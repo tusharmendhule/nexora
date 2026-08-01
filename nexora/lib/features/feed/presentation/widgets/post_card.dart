@@ -346,9 +346,9 @@ class _TrustVerdict extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: pendingColor.withValues(alpha: 0.4)),
         ),
-        child: Row(
+        child: const Row(
           children: [
-            const SizedBox(
+            SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
@@ -356,13 +356,13 @@ class _TrustVerdict extends StatelessWidget {
                 color: AppColors.trustOrange,
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Text(
               'AI fact-check in progress…',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: pendingColor,
+                color: AppColors.trustOrange,
               ),
             ),
           ],

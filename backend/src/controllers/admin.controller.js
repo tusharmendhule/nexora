@@ -4,11 +4,85 @@ import { Report } from "../models/Report.js";
 import { Follow } from "../models/Follow.js";
 import { TrustResult } from "../models/TrustResult.js";
 import { Notification } from "../models/Notification.js";
+import { Like } from "../models/Like.js";
+import { Comment } from "../models/Comment.js";
+
+/** List users with filters + pagination for the admin dashboard. */
+export async function listUsers(req, res, next) {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Number(req.query.limit) || 20);
+    const role = req.query.role;
+    const q = req.query.q?.trim();
+
+    const filter = {};
+    if (role) filter.role = role;
+    if (q) {
+      filter.$or = [
+        { name: { $regex: q, $options: "i" } },
+        { username: { $regex: q, $options: "i" } },
+        { email: { $regex: q, $options: "i" } },
+      ];
+    }
+
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select("name username email avatar role trustScore trustLabel isVerified createdAt"),
+    ]);
+
+    res.json({
+      data: users,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Change a user's role (admin only). Prevents self-demotion. */
+export async function updateUserRole(req, res, next) {
+  try {
+    const { role } = req.body;
+    if (!["user", "moderator", "admin"].includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+    const target = await User.findById(req.params.id);
+    if (!target) return res.status(404).json({ error: "User not found" });
+    if (target._id.toString() === req.user._id.toString() && role !== "admin") {
+      return res.status(400).json({ error: "Cannot demote yourself" });
+    }
+    target.role = role;
+    await target.save();
+    res.json({ ok: true, user: target });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Ban / restore a user account (admin only). */
+export async function toggleUserBan(req, res, next) {
+  try {
+    const target = await User.findById(req.params.id);
+    if (!target) return res.status(404).json({ error: "User not found" });
+    if (target._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ error: "Cannot ban yourself" });
+    }
+    target.isBanned = !target.isBanned;
+    await target.save();
+    res.json({ ok: true, isBanned: target.isBanned });
+  } catch (err) {
+    next(err);
+  }
+}
 
 /** Platform-wide stats for the admin dashboard. */
 export async function getAdminStats(req, res, next) {
   try {
-    const [users, posts, openReports, follows, trustResults, notifications] =
+    const [users, posts, openReports, follows, trustResults, notifications, likes, comments] =
       await Promise.all([
         User.countDocuments(),
         Post.countDocuments(),
@@ -16,6 +90,8 @@ export async function getAdminStats(req, res, next) {
         Follow.countDocuments(),
         TrustResult.countDocuments(),
         Notification.countDocuments(),
+        Like.countDocuments(),
+        Comment.countDocuments(),
       ]);
 
     // 8-week growth (approximate from createdAt buckets).
@@ -50,6 +126,8 @@ export async function getAdminStats(req, res, next) {
         follows,
         trustResults,
         notifications,
+        likes,
+        comments,
       },
       growth: cumulativeGrowth,
       topUsers: topUsers.map((u) => ({

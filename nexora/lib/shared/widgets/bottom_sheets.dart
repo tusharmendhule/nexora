@@ -477,15 +477,52 @@ class _ReportContentState extends ConsumerState<_ReportContent> {
           ),
           const SizedBox(height: 12),
           ..._reportReasons.map(
-            (reason) => RadioListTile<String>(
-              value: reason,
-              groupValue: _selected,
-              onChanged: (v) => setState(() => _selected = v),
-              title: Text(reason, style: const TextStyle(fontSize: 14)),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              activeColor: AppColors.trustRed,
-            ),
+            (reason) {
+              final selected = _selected == reason;
+              return InkWell(
+                onTap: () => setState(() => _selected = reason),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                  child: Row(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: selected ? AppColors.trustRed : scheme.outline,
+                            width: 2,
+                          ),
+                          color: selected
+                              ? AppColors.trustRed
+                              : Colors.transparent,
+                        ),
+                        child: selected
+                            ? const Icon(
+                                Icons.check_rounded,
+                                size: 14,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        reason,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w500,
+                          color: selected ? AppColors.trustRed : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           SizedBox(

@@ -5,6 +5,7 @@ import { TrustResult } from "../models/TrustResult.js";
 import { Bookmark } from "../models/Bookmark.js";
 import { Notification } from "../models/Notification.js";
 import { toUserResponse } from "./auth.controller.js";
+import { emitToUser } from "../services/socket.service.js";
 
 /** Search users, posts and hashtags with a single query. */
 export async function searchAll(req, res, next) {
@@ -231,11 +232,20 @@ export async function toggleFollow(req, res, next) {
     await Follow.create({ follower: req.user._id, following: target._id });
     await User.findByIdAndUpdate(target._id, { $inc: { followersCount: 1 } });
     await User.findByIdAndUpdate(req.user._id, { $inc: { followingCount: 1 } });
-    await Notification.create({
+    const notification = await Notification.create({
       user: target._id,
       actor: req.user._id,
       type: "follow",
       text: "started following you.",
+    });
+    emitToUser(target._id, "notify:new", {
+      id: notification._id.toString(),
+      type: "follow",
+      actor: req.user._id,
+      text: "started following you.",
+      postPreview: null,
+      isRead: false,
+      createdAt: notification.createdAt,
     });
     res.json({ following: true, followers: target.followersCount + 1 });
   } catch (err) {

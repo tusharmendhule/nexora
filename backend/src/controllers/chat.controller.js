@@ -1,8 +1,9 @@
 import { Conversation } from "../models/Conversation.js";
 import { Message } from "../models/Message.js";
 import { User } from "../models/User.js";
+import { emitToUser } from "../services/socket.service.js";
 
-/** List the current user's conversations with unread counts. */
+/** List the current user's conversations with unread counts (batched). */
 export async function listConversations(req, res, next) {
   try {
     const conversations = await Conversation.find({
@@ -13,35 +14,59 @@ export async function listConversations(req, res, next) {
       .populate("participants", "name avatar username trustLabel trustScore isVerified")
       .lean();
 
-    const data = [];
-    for (const convo of conversations) {
-      const messages = await Message.find({ conversation: convo._id })
-        .sort({ createdAt: -1 })
-        .limit(1)
-        .lean();
-      const unread = await Message.countDocuments({
-        conversation: convo._id,
-        sender: { $ne: req.user._id },
-        isRead: false,
-      });
+    const convoIds = conversations.map((c) => c._id);
+    if (convoIds.length === 0) return res.json({ data: [] });
+
+    // Batch 1: the latest message per conversation.
+    const lastMessages = await Message.aggregate([
+      { $match: { conversation: { $in: convoIds } } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$conversation",
+          id: { $first: "$_id" },
+          sender: { $first: "$sender" },
+          text: { $first: "$text" },
+          createdAt: { $first: "$createdAt" },
+        },
+      },
+    ]);
+    const lastByConvo = new Map(lastMessages.map((m) => [m._id.toString(), m]));
+
+    // Batch 2: unread counts for all conversations at once.
+    const unreadRows = await Message.aggregate([
+      {
+        $match: {
+          conversation: { $in: convoIds },
+          sender: { $ne: req.user._id },
+          isRead: false,
+        },
+      },
+      { $group: { _id: "$conversation", count: { $sum: 1 } } },
+    ]);
+    const unreadByConvo = new Map(
+      unreadRows.map((r) => [r._id.toString(), r.count]),
+    );
+
+    const data = conversations.map((convo) => {
       const peer = convo.participants.find(
         (p) => p._id.toString() !== req.user._id.toString(),
       );
-      const last = messages[0];
-      data.push({
+      const last = lastByConvo.get(convo._id.toString());
+      return {
         id: convo._id.toString(),
         participant: peer ?? convo.participants[0],
         lastMessage: last
           ? {
-              id: last._id.toString(),
+              id: last.id.toString(),
               senderId: last.sender.toString(),
               text: last.text,
               createdAt: last.createdAt,
             }
           : null,
-        unreadCount: unread,
-      });
-    }
+        unreadCount: unreadByConvo.get(convo._id.toString()) ?? 0,
+      };
+    });
     res.json({ data });
   } catch (err) {
     next(err);
@@ -59,12 +84,18 @@ export async function startConversation(req, res, next) {
     let convo = await Conversation.findOne({
       participants: { $all: [req.user._id, other._id] },
     });
+    const isNew = !convo;
     if (!convo) {
       convo = await Conversation.create({
         participants: [req.user._id, other._id],
       });
     }
-    res.status(201).json({ conversationId: convo._id.toString() });
+    const conversationId = convo._id.toString();
+    if (isNew) {
+      // Real-time: let the peer know a fresh conversation exists.
+      emitToUser(other._id, "chat:conversation", { conversationId });
+    }
+    res.status(201).json({ conversationId });
   } catch (err) {
     next(err);
   }
@@ -122,15 +153,24 @@ export async function sendMessage(req, res, next) {
     await Conversation.findByIdAndUpdate(convo._id, {
       lastMessageAt: new Date(),
     });
-    res.status(201).json({
-      message: {
-        id: message._id.toString(),
-        senderId: message.sender.toString(),
-        text: message.text,
-        createdAt: message.createdAt,
-        isRead: message.isRead,
-      },
-    });
+
+    const payload = {
+      id: message._id.toString(),
+      conversationId: convo._id.toString(),
+      senderId: message.sender.toString(),
+      text: message.text,
+      createdAt: message.createdAt,
+      isRead: message.isRead,
+    };
+
+    // Real-time: deliver instantly to every other participant.
+    const others = convo.participants.filter(
+      (p) => p.toString() !== req.user._id.toString(),
+    );
+    for (const other of others) {
+      emitToUser(other, "chat:message", payload);
+    }
+    res.status(201).json({ message: payload });
   } catch (err) {
     next(err);
   }

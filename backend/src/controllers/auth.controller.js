@@ -1,17 +1,37 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { User } from "../models/User.js";
-import { verifyIdToken } from "../services/firebase.service.js";
+import { RefreshToken } from "../models/RefreshToken.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 
-const signToken = (userId) =>
-  jwt.sign({ sub: userId.toString() }, env.jwtSecret, { expiresIn: "7d" });
+const ACCESS_TOKEN_TTL = "15m";
+const REFRESH_TOKEN_TTL_DAYS = 30;
+
+/** Sign a short-lived access token (used on every API call). */
+const signAccessToken = (userId) =>
+  jwt.sign({ sub: userId.toString(), type: "access" }, env.jwtSecret, {
+    expiresIn: ACCESS_TOKEN_TTL,
+  });
+
+/** Generate a cryptographically-random refresh token and persist its hash. */
+async function issueRefreshToken(user, req) {
+  const raw = crypto.randomBytes(48).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(raw).digest("hex");
+  await RefreshToken.create({
+    user: user._id,
+    tokenHash,
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 3600 * 1000),
+    userAgent: req.headers["user-agent"]?.slice(0, 200) ?? "",
+    ip: req.ip ?? "",
+  });
+  return raw;
+}
 
 /** Shape the Mongo user document for API responses. */
 export function toUserResponse(user) {
   return {
     id: user._id.toString(),
-    firebaseUid: user.firebaseUid ?? null,
     email: user.email,
     name: user.name,
     username: user.username ?? "",
@@ -29,13 +49,22 @@ export function toUserResponse(user) {
   };
 }
 
+/** Build the auth payload (access + refresh + user). */
+async function authPayload(user, req) {
+  const refreshToken = await issueRefreshToken(user, req);
+  return {
+    token: signAccessToken(user._id),
+    refreshToken,
+    user: toUserResponse(user),
+  };
+}
+
 const handleAuthError = (res, err, next) => {
-  if (err.status === 503) return res.status(503).json({ error: err.message });
   if (err.code === 11000) return res.status(409).json({ error: "Account already exists" });
-  return res.status(401).json({ error: "Invalid credentials" });
+  return next(err);
 };
 
-/* ── Email / password (built-in Nexora auth) ─────────────────────────── */
+/* ── Email / password (manual JWT auth) ─────────────────────────────── */
 
 export async function registerEmailPassword(req, res, next) {
   try {
@@ -63,9 +92,9 @@ export async function registerEmailPassword(req, res, next) {
       username: cleanUsername,
     });
 
-    res.status(201).json({ token: signToken(user._id), user: toUserResponse(user) });
+    res.status(201).json(await authPayload(user, req));
   } catch (err) {
-    next(err);
+    handleAuthError(res, err, next);
   }
 }
 
@@ -79,7 +108,7 @@ export async function loginEmailPassword(req, res, next) {
     if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
-    res.json({ token: signToken(user._id), user: toUserResponse(user) });
+    res.json(await authPayload(user, req));
   } catch (err) {
     next(err);
   }
@@ -95,69 +124,76 @@ export async function createGuest(req, res, next) {
       name: `Guest ${suffix.slice(0, 4).toUpperCase()}`,
       username: `guest_${suffix}`,
     });
-    res.status(201).json({ token: signToken(user._id), user: toUserResponse(user) });
+    res.status(201).json(await authPayload(user, req));
   } catch (err) {
     next(err);
   }
 }
 
-/* ── Firebase (optional legacy flow) ─────────────────────────────────── */
+/* ── Refresh tokens (rotation + revocation) ─────────────────────────── */
 
 /**
- * Exchange a Firebase ID token for a Nexora JWT + profile.
- * Looks the user up by `firebaseUid`; creates the profile on first sign-in.
+ * Exchange a valid refresh token for a new access token + rotated refresh
+ * token. Rotation means the presented token is revoked and a new one issued,
+ * so a stolen token can only be used once.
  */
-export async function loginWithFirebase(req, res, next) {
+export async function refresh(req, res, next) {
   try {
-    const { idToken } = req.body;
-    if (!idToken) return res.status(400).json({ error: "idToken is required" });
-
-    const decoded = await verifyIdToken(idToken);
-
-    let user = await User.findOne({ firebaseUid: decoded.uid });
-    if (!user) {
-      user = await User.create({
-        firebaseUid: decoded.uid,
-        email: decoded.email ?? `${decoded.uid}@nexora.local`,
-        name: decoded.name ?? "Nexora user",
-        avatar: decoded.picture ?? "",
-      });
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ error: "refreshToken required" });
+    }
+    const tokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+    const stored = await RefreshToken.findOne({ tokenHash });
+    if (!stored || stored.revokedAt) {
+      return res.status(401).json({ error: "Invalid refresh token" });
+    }
+    if (stored.expiresAt < new Date()) {
+      await RefreshToken.deleteOne({ _id: stored._id });
+      return res.status(401).json({ error: "Refresh token expired" });
     }
 
-    res.json({ token: signToken(user._id), user: toUserResponse(user) });
+    const user = await User.findById(stored.user);
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    // Rotate: revoke this token, issue a fresh pair.
+    const raw = crypto.randomBytes(48).toString("hex");
+    const nextHash = crypto.createHash("sha256").update(raw).digest("hex");
+    await RefreshToken.create({
+      user: user._id,
+      tokenHash: nextHash,
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 3600 * 1000),
+      userAgent: req.headers["user-agent"]?.slice(0, 200) ?? "",
+      ip: req.ip ?? "",
+    });
+    stored.revokedAt = new Date();
+    stored.replacedBy = nextHash;
+    await stored.save();
+
+    res.json({
+      token: signAccessToken(user._id),
+      refreshToken: raw,
+      user: toUserResponse(user),
+    });
   } catch (err) {
-    handleAuthError(res, err, next);
+    next(err);
   }
 }
 
-/**
- * Create a Nexora profile for a brand-new Firebase user (sign-up).
- * Requires a verified ID token plus the profile fields from the register form.
- */
-export async function registerWithFirebase(req, res, next) {
+/** Revoke the presented refresh token (logout). */
+export async function logout(req, res, next) {
   try {
-    const { idToken, name, username } = req.body;
-    if (!idToken) return res.status(400).json({ error: "idToken is required" });
-    if (!name || !username) return res.status(400).json({ error: "name and username are required" });
-
-    const decoded = await verifyIdToken(idToken);
-
-    const existing = await User.findOne({
-      $or: [{ firebaseUid: decoded.uid }, { username }],
-    });
-    if (existing) return res.status(409).json({ error: "Account already exists" });
-
-    const user = await User.create({
-      firebaseUid: decoded.uid,
-      email: decoded.email ?? `${decoded.uid}@nexora.local`,
-      name,
-      username,
-      avatar: decoded.picture ?? "",
-    });
-
-    res.status(201).json({ token: signToken(user._id), user: toUserResponse(user) });
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      const tokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+      await RefreshToken.updateOne(
+        { tokenHash, revokedAt: null },
+        { revokedAt: new Date() },
+      );
+    }
+    res.json({ ok: true });
   } catch (err) {
-    handleAuthError(res, err, next);
+    next(err);
   }
 }
 

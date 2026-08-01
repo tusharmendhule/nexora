@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/user.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/socket_service.dart';
 import '../data/auth_repository.dart';
 
 /// Always the real API-backed repository (email/password, MongoDB users).
@@ -62,6 +63,7 @@ class AuthNotifier extends Notifier<AuthState> {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final user = await _repository.signInWithEmail(email, password);
+      ref.read(socketServiceProvider).connect();
       state = state.copyWith(
         user: user,
         isOnboarded: true,
@@ -97,6 +99,7 @@ class AuthNotifier extends Notifier<AuthState> {
         email: email,
         password: password,
       );
+      ref.read(socketServiceProvider).connect();
       state = state.copyWith(
         user: user,
         isOnboarded: true,
@@ -123,6 +126,7 @@ class AuthNotifier extends Notifier<AuthState> {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final user = await _repository.signInAsGuest();
+      ref.read(socketServiceProvider).connect();
       state = state.copyWith(
         user: user,
         isOnboarded: true,
@@ -186,6 +190,7 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> signOut() async {
+    ref.read(socketServiceProvider).disconnect();
     await _repository.signOut();
     state = state.copyWith(user: null, isLoading: false);
   }

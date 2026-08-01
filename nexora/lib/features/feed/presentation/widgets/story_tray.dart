@@ -103,7 +103,7 @@ class _StoryTrayState extends ConsumerState<StoryTray> {
                               child: CircularProgressIndicator(strokeWidth: 2.5),
                             ),
                           )
-                        : NexoraAvatar(
+                        : const NexoraAvatar(
                             imageUrl: null,
                             fallbackText: 'You',
                             size: 58,

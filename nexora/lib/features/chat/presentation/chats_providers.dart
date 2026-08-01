@@ -102,6 +102,47 @@ class ChatsNotifier extends Notifier<ChatsState> {
     } catch (_) {/* keep local copy */}
   }
 
+  /// Real-time: append an incoming message pushed by the Socket.IO gateway.
+  void ingestIncomingMessage(Map<String, dynamic> payload) {
+    final chatId = payload['conversationId'] as String?;
+    if (chatId == null) return;
+    final me = ref.read(authProvider).user;
+    final incoming = Message.fromApi({
+      'id': payload['id'],
+      'senderId': payload['senderId'],
+      'text': payload['text'],
+      'createdAt': payload['createdAt'],
+      'isRead': payload['isRead'] == true,
+    });
+    final isMine = me != null && incoming.senderId == me.id;
+    state = state.copyWith(
+      chats: [
+        for (final c in state.chats)
+          if (c.id == chatId)
+            Chat(
+              id: c.id,
+              participant: c.participant,
+              messages: [
+                if (c.messages.isEmpty) incoming else ...c.messages,
+                if (c.messages.isNotEmpty) incoming,
+              ],
+              unread: isMine ? c.unread : c.unread + 1,
+            )
+          else
+            c,
+      ],
+    );
+  }
+
+  /// Real-time: a brand-new conversation was created for the current user.
+  void ingestConversation(Map<String, dynamic> payload) {
+    final chatId = payload['conversationId'] as String?;
+    if (chatId == null) return;
+    if (chatById(chatId) != null) return;
+    // Fetch the full list so the new conversation renders with its peer.
+    _load();
+  }
+
   Future<void> loadMessages(String chatId) async {
     try {
       final json = await ref

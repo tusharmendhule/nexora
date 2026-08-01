@@ -1,24 +1,14 @@
 import { User } from "../models/User.js";
 import { TrustResult } from "../models/TrustResult.js";
 import { ai } from "../services/ai.service.js";
+import { recomputeUserTrust } from "../services/trust.service.js";
 
-/** Recompute a user's trust score from their post trust results. */
+/** Recompute a user's trust score from their post trust results (real AI outputs). */
 export async function recomputeTrust(req, res, next) {
   try {
-    const results = await TrustResult.find({ userId: req.user._id }).lean();
-    const avg =
-      results.length === 0
-        ? 50
-        : results.reduce((sum, r) => sum + r.score, 0) / results.length;
-
-    const label =
-      avg >= 75 ? "Verified" : avg >= 60 ? "Vetted" : avg >= 45 ? "Watch" : "Restricted";
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { trustScore: Math.round(avg), trustLabel: label },
-      { new: true },
-    );
-    res.json({ user, historyCount: results.length });
+    const result = await recomputeUserTrust(req.user._id);
+    if (!result) return res.status(404).json({ error: "User not found" });
+    res.json({ user: result.user, historyCount: result.historyCount });
   } catch (err) {
     next(err);
   }

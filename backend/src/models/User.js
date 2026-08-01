@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
   {
-    firebaseUid: { type: String, unique: true, sparse: true },
     email: { type: String, required: true, unique: true, lowercase: true },
     passwordHash: { type: String, default: "" },
     name: { type: String, required: true, trim: true },
@@ -24,6 +23,7 @@ const userSchema = new mongoose.Schema(
       default: "Watch",
     },
     isVerified: { type: Boolean, default: false },
+    isBanned: { type: Boolean, default: false },
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
   },

@@ -36,5 +36,7 @@ const postSchema = new mongoose.Schema(
 
 postSchema.index({ author: 1, createdAt: -1 });
 postSchema.index({ moderationStatus: 1, createdAt: -1 });
+postSchema.index({ hashtags: 1 });
+postSchema.index({ "media.type": 1, createdAt: -1 });
 
 export const Post = mongoose.model("Post", postSchema);

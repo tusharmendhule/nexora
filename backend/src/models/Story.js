@@ -11,5 +11,6 @@ const storySchema = new mongoose.Schema(
 );
 
 storySchema.index({ expiresAt: 1 });
+storySchema.index({ user: 1, createdAt: -1 });
 
 export const Story = mongoose.model("Story", storySchema);

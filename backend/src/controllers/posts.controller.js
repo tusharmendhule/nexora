@@ -7,6 +7,8 @@ import { Notification } from "../models/Notification.js";
 import { media } from "../services/cloudinary.service.js";
 import { ai } from "../services/ai.service.js";
 import { cache } from "../services/redis.service.js";
+import { emitToUser } from "../services/socket.service.js";
+import { recomputeUserTrust } from "../services/trust.service.js";
 
 /** Coerce mention strings/usernames into valid User ObjectIds (drop invalid). */
 async function resolveMentions(mentions) {
@@ -151,6 +153,8 @@ export async function createPost(req, res, next) {
           isTrustEvent: true,
           post: post._id,
         });
+        // Aggregate the user's live trust score from all real AI results.
+        await recomputeUserTrust(req.user._id);
         await cache.delPattern(`feed:*`);
         return trust;
       })
@@ -245,12 +249,21 @@ export async function toggleLike(req, res, next) {
     await Like.create({ post: id, user: req.user._id });
     await Post.findByIdAndUpdate(id, { $inc: { likesCount: 1 } });
     if (post.author.toString() !== req.user._id.toString()) {
-      await Notification.create({
+      const notification = await Notification.create({
         user: post.author,
         actor: req.user._id,
         type: "like",
         text: "liked your post.",
         post: post._id,
+      });
+      emitToUser(post.author, "notify:new", {
+        id: notification._id.toString(),
+        type: "like",
+        actor: req.user._id,
+        text: "liked your post.",
+        postPreview: post.media?.[0]?.url ?? null,
+        isRead: false,
+        createdAt: notification.createdAt,
       });
     }
     res.json({ liked: true, likesCount: post.likesCount + 1 });
@@ -343,12 +356,21 @@ export async function addComment(req, res, next) {
     });
     await Post.findByIdAndUpdate(post._id, { $inc: { commentsCount: 1 } });
     if (post.author.toString() !== req.user._id.toString()) {
-      await Notification.create({
+      const notification = await Notification.create({
         user: post.author,
         actor: req.user._id,
         type: "comment",
         text: `commented: "${text.trim().slice(0, 60)}${text.trim().length > 60 ? "…" : ""}"`,
         post: post._id,
+      });
+      emitToUser(post.author, "notify:new", {
+        id: notification._id.toString(),
+        type: "comment",
+        actor: req.user._id,
+        text: `commented: "${text.trim().slice(0, 60)}${text.trim().length > 60 ? "…" : ""}"`,
+        postPreview: post.media?.[0]?.url ?? null,
+        isRead: false,
+        createdAt: notification.createdAt,
       });
     }
 

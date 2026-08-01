@@ -1,6 +1,5 @@
-"""Fact-check lookup powered by Google Gemini (primary) with a legacy
-Google Fact Check Tools API fallback. Both degrade gracefully to [] when
-no API key is configured, so the service still runs locally.
+"""Fact-check lookup powered by Google Gemini. Degrades gracefully to []
+when no API key is configured, so the service still runs locally.
 """
 
 import json
@@ -10,7 +9,6 @@ import httpx
 
 from app.config import settings
 
-FACTCHECK_URL = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "gemini-1.5-flash:generateContent"
@@ -24,8 +22,6 @@ async def search_fact_checks(query: str, language_code: str = "en") -> list[dict
         items = await _gemini_factcheck(query)
         if items:
             return items
-    if settings.factcheck_api_key:
-        return await _legacy_factcheck(query, language_code)
     print("[factcheck] no GEMINI_API_KEY configured — returning empty results.")
     return []
 
@@ -91,32 +87,3 @@ def _strip_json(text: str) -> str:
     return text
 
 
-async def _legacy_factcheck(query: str, language_code: str) -> list[dict]:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                FACTCHECK_URL,
-                params={
-                    "query": query,
-                    "languageCode": language_code,
-                    "key": settings.factcheck_api_key,
-                },
-            )
-            resp.raise_for_status()
-            claims = resp.json().get("claims", [])
-        items = []
-        for claim in claims:
-            review = (claim.get("claimReview") or [{}])[0]
-            items.append(
-                {
-                    "publisher": (review.get("publisher") or {}).get("name", ""),
-                    "title": review.get("title", ""),
-                    "url": review.get("url", ""),
-                    "rating": review.get("textualRating", ""),
-                    "checked_date": review.get("reviewDate"),
-                }
-            )
-        return items
-    except Exception as exc:  # pragma: no cover
-        print(f"[factcheck] legacy lookup failed: {exc}")
-        return []

@@ -1,25 +1,18 @@
-import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
-const ITERATIONS = 100_000;
-const KEY_LEN = 64;
+const SALT_ROUNDS = 10;
 
-/** Hash a plaintext password with a random salt (scrypt). */
+/** Hash a plaintext password with bcrypt. */
 export function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto
-    .scryptSync(password, salt, KEY_LEN, { N: 16384, r: 8, p: 1 })
-    .toString("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, SALT_ROUNDS);
 }
 
-/** Verify a plaintext password against a stored `salt:hash` string. */
+/** Verify a plaintext password against a stored bcrypt hash. */
 export function verifyPassword(password, stored) {
-  if (!stored || !stored.includes(":")) return false;
-  const [salt, hash] = stored.split(":");
-  const candidate = crypto
-    .scryptSync(password, salt, KEY_LEN, { N: 16384, r: 8, p: 1 })
-    .toString("hex");
-  const a = Buffer.from(hash, "hex");
-  const b = Buffer.from(candidate, "hex");
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!stored || typeof stored !== "string") return false;
+  try {
+    return bcrypt.compareSync(password, stored);
+  } catch {
+    return false;
+  }
 }

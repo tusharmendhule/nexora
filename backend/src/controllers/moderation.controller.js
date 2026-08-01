@@ -12,18 +12,23 @@ export async function getQueue(req, res, next) {
       .populate("reporter", "name avatar username trustLabel trustScore")
       .lean();
 
-    const data = [];
-    for (const report of reports) {
-      let target = null;
-      if (report.targetType === "post") {
-        target = await Post.findById(report.targetId).populate(
-          "author",
-          "name avatar username trustLabel trustScore",
-        );
-      } else if (report.targetType === "user") {
-        target = { _id: report.targetId };
-      }
-      data.push({
+    // Batch-load every targeted post in one query (avoids N+1).
+    const postIds = reports
+      .filter((r) => r.targetType === "post")
+      .map((r) => r.targetId);
+    const posts = postIds.length
+      ? await Post.find({ _id: { $in: postIds } })
+          .populate("author", "name avatar username trustLabel trustScore")
+          .lean()
+      : [];
+    const postById = new Map(posts.map((p) => [p._id.toString(), p]));
+
+    const data = reports.map((report) => {
+      const target =
+        report.targetType === "post"
+          ? postById.get(report.targetId.toString()) ?? null
+          : { _id: report.targetId };
+      return {
         id: report._id.toString(),
         reportId: report._id.toString(),
         reportedUser: target?.author ?? null,
@@ -35,8 +40,8 @@ export async function getQueue(req, res, next) {
         severity: report.reason === "harassment" || report.reason === "violence" ? 3 : report.reason === "spam" ? 2 : 1,
         reportedAt: report.createdAt,
         status: report.status,
-      });
-    }
+      };
+    });
     res.json({ data });
   } catch (err) {
     next(err);
