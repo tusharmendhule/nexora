@@ -47,6 +47,36 @@ uvicorn app.main:app --reload                       # http://localhost:8000
 docker compose up --build
 ```
 
+### Seed data & scripts (backend)
+
+The API ships with two seed scripts plus an end-to-end test script, all run
+from the `backend/` directory (they read `MONGODB_URI` from `.env`):
+
+```bash
+cd backend
+
+# 1) Fresh demo dataset — 8 members, posts, chats, notifications, reports,
+#    stories. WARNING: wipes users/posts/trust results/etc. first.
+node scripts/seed.mjs
+
+# 2) Add 200 more realistic posts with AI content checks (additive, nothing
+#    is deleted). Pass a number to change the count.
+node scripts/seed-posts.mjs          # 200 posts
+node scripts/seed-posts.mjs 500      # 500 posts
+
+# 3) E2E sweep of every DB-writing endpoint against a live backend on :4000.
+bash scripts/e2e-test.sh
+```
+
+Demo accounts (password `nexora123`):
+
+| Email               | Role      |
+| ------------------- | --------- |
+| `aria@nexora.test`  | user      |
+| `sofia@nexora.test` | user      |
+| `marcus@nexora.test`| moderator |
+| `dev@nexora.test`   | admin     |
+
 ## System Architecture
 
 | Layer          | Technology                              | Purpose                                              |
@@ -55,7 +85,7 @@ docker compose up --build
 | API            | Node.js, Express.js                     | REST APIs, content workflow, feed & moderation logic |
 | AI Service     | Python, PyTorch/TensorFlow, Hugging Face| Model inference and NLP processing                   |
 | Database       | MongoDB Atlas                           | Users, posts, trust results, reports & moderation logs |
-| Authentication | Firebase Authentication, JWT            | Identity provider integration & API authorisation    |
+| Authentication | JWT (email/password + refresh rotation)  | Manual auth with bcrypt + short-lived access tokens  |
 | Media          | Cloudinary                              | Media storage and CDN delivery                       |
 | Caching        | Redis                                   | Optional caching for repeated or short-lived results |
 | Verification   | Google Gemini (via AI service)          | LLM fact-check lookup and content review evidence     |
@@ -66,3 +96,28 @@ docker compose up --build
 Nexora's signature feature: every member carries a **Trust Score (0–100)** and a
 **color-coded Trust Label** shown across the app. See `nexora/README.md` for the
 full label table.
+
+## Admin settings API
+
+Admins can toggle three platform-wide switches through the REST API (the admin
+dashboard in the Flutter app binds to these):
+
+| Method | Route                  | Auth  | Description                                       |
+| ------ | ---------------------- | ----- | ------------------------------------------------- |
+| GET    | `/api/v1/admin/settings` | Admin | Read the current settings                         |
+| PUT    | `/api/v1/admin/settings` | Admin | Persist any of the switches below                 |
+
+```jsonc
+// PUT /api/v1/admin/settings  — send only the fields you want to change
+{
+  "maintenanceMode": true,        // blocks post/story creation for members (HTTP 503)
+  "verifiedOnlyExplore": false,   // Explore shows verified creators only
+  "aiTriage": true                // gates AI auto-flagging of severe content
+}
+```
+
+All three are stored as a single `AdminSettings` document in MongoDB and are
+**enforced server-side**: `maintenanceMode` rejects member mutations with
+`503`, `verifiedOnlyExplore` filters the Explore feed to `isVerified` authors,
+and `aiTriage` controls whether the AI content pipeline auto-flags posts into
+the moderation queue. See `backend/README.md` for the full endpoint list.

@@ -25,8 +25,15 @@ Docs: http://localhost:8000/docs
 | Method | Route            | Description                                  |
 | ------ | ---------------- | -------------------------------------------- |
 | GET    | `/health`        | Health check                                 |
-| POST   | `/v1/analyze`    | Trust score + label + factors for text       |
+| POST   | `/v1/analyze`    | Trust score + label + six content checks     |
 | GET    | `/v1/factcheck`  | Look up claim reviews (`?query=...`)         |
+
+`POST /v1/analyze` returns a 0–100 trust score, a color-coded label, and six
+content-risk checks (fake news, hate speech, toxic language, clickbait, spam,
+offensive content), each with a risk score 0–100, a `none/low/medium/high`
+level, and the matched signals. The Gemini LLM pass (`content_review.py`)
+refines the checks when `GEMINI_API_KEY` is set; otherwise heuristic checks
+are the guaranteed fallback.
 
 ## Structure
 
