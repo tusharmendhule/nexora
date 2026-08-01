@@ -1,0 +1,39 @@
+name: nexora
+description: "Nexora – The Next Generation of Connected Communities. A premium trust-first social platform frontend built with Flutter, Riverpod and Clean Architecture."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Navigation
+  go_router: ^14.6.2
+
+  # Premium typography
+  google_fonts: ^6.2.1
+
+  # Media
+  cached_network_image: ^3.4.1
+  video_player: ^2.9.2
+  image_picker: ^1.1.2
+
+  # Utilities
+  intl: ^0.19.0
+  firebase_core: ^4.12.1
+  firebase_auth: ^6.5.6
+  http: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

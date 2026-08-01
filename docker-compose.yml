@@ -1,0 +1,46 @@
+services:
+  api:
+    build: ./backend
+    container_name: nexora-api
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/nexora
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai-service:8000
+      # Paste real values (or use an .env file) for:
+      # JWT_SECRET, FIREBASE_*, CLOUDINARY_*, GOOGLE_FACTCHECK_API_KEY
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+
+  ai-service:
+    build: ./ai-service
+    container_name: nexora-ai
+    ports:
+      - "8000:8000"
+    environment:
+      AI_SERVICE_PORT: 8000
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: nexora-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexora-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
