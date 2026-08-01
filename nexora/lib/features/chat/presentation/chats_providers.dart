@@ -122,10 +122,7 @@ class ChatsNotifier extends Notifier<ChatsState> {
             Chat(
               id: c.id,
               participant: c.participant,
-              messages: [
-                if (c.messages.isEmpty) incoming else ...c.messages,
-                if (c.messages.isNotEmpty) incoming,
-              ],
+              messages: [...c.messages, incoming],
               unread: isMine ? c.unread : c.unread + 1,
             )
           else

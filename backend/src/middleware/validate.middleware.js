@@ -5,7 +5,7 @@ import { ZodError } from "zod";
  * readable message; on success, replaces req.body with the parsed (and thus
  * sanitized / coerced) value.
  */
-export function validate(schema, { stripUnknown = true } = {}) {
+export function validate(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
