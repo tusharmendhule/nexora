@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/network/api_client.dart';
 import '../../features/auth/presentation/auth_provider.dart';
+import '../../features/chat/presentation/chats_providers.dart';
 import '../../features/feed/data/models.dart';
 import '../../features/feed/presentation/feed_providers.dart';
 import 'avatar.dart';
@@ -313,32 +315,102 @@ class _NoComments extends StatelessWidget {
 // Share sheet
 // ---------------------------------------------------------------------------
 
+/// Shareable payload for a post or reel (both map to a real post document).
+class SharePayload {
+  const SharePayload({required this.postId, required this.caption});
+
+  final String postId;
+  final String caption;
+
+  String get link => 'https://nexora.app/p/$postId';
+}
+
 /// Opens the share sheet for a post.
 Future<void> showShareSheet(BuildContext context, Post post) {
   return showNexoraSheet<void>(
     context,
-    builder: (context) => Padding(
+    builder: (context) => _ShareSheetContent(
+      title: 'Share this post',
+      payload: SharePayload(postId: post.id, caption: post.caption),
+    ),
+  ).then((_) => null);
+}
+
+/// Opens the share sheet for a reel (reels map to real posts).
+Future<void> showReelShareSheet(BuildContext context, String reelId,
+    String caption) {
+  return showNexoraSheet<void>(
+    context,
+    builder: (context) => _ShareSheetContent(
+      title: 'Share reel',
+      payload: SharePayload(postId: reelId, caption: caption),
+    ),
+  ).then((_) => null);
+}
+
+class _ShareSheetContent extends ConsumerStatefulWidget {
+  const _ShareSheetContent({required this.title, required this.payload});
+
+  final String title;
+  final SharePayload payload;
+
+  @override
+  ConsumerState<_ShareSheetContent> createState() => _ShareSheetContentState();
+}
+
+class _ShareSheetContentState extends ConsumerState<_ShareSheetContent> {
+  Future<void> _copyLink(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: widget.payload.link));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Link copied to clipboard 🔗'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Share via DM: pick a conversation and send the post link as a real
+  /// chat message through the API.
+  Future<void> _shareViaDm(BuildContext context) async {
+    await showNexoraSheet<void>(
+      context,
+      builder: (_) => _DmPickerSheet(payload: widget.payload),
+      scrollControlled: true,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Share this post',
+            widget.title,
             style: Theme.of(context)
                 .textTheme
                 .titleMedium
                 ?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 16),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _ShareTarget(icon: Icons.link_rounded, label: 'Copy link', color: AppColors.brand),
-              _ShareTarget(icon: Icons.chat_rounded, label: 'Nexora DM', color: AppColors.accentCyan),
-              _ShareTarget(icon: Icons.telegram_rounded, label: 'Telegram', color: AppColors.trustBlue),
-              _ShareTarget(icon: Icons.camera_alt_rounded, label: 'Stories', color: AppColors.trustPurple),
-              _ShareTarget(icon: Icons.more_horiz_rounded, label: 'More', color: AppColors.trustOrange),
+              _ShareTarget(
+                icon: Icons.link_rounded,
+                label: 'Copy link',
+                color: AppColors.brand,
+                onTap: () => _copyLink(context),
+              ),
+              _ShareTarget(
+                icon: Icons.chat_rounded,
+                label: 'Nexora DM',
+                color: AppColors.accentCyan,
+                onTap: () => _shareViaDm(context),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -352,34 +424,173 @@ Future<void> showShareSheet(BuildContext context, Post post) {
           ),
         ],
       ),
-    ),
-  ).then((_) => null);
+    );
+  }
+}
+
+/// Conversation picker that shares a post link via a real chat message.
+class _DmPickerSheet extends ConsumerWidget {
+  const _DmPickerSheet({required this.payload});
+
+  final SharePayload payload;
+
+  Future<void> _send(BuildContext context, WidgetRef ref, String chatId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final sent = await ref.read(chatsProvider.notifier).sendMessage(
+          chatId,
+          '${payload.link}\n\n${payload.caption}',
+        );
+    if (!sent) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not send the message. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    navigator.pop(); // close the picker
+    navigator.pop(); // close the share sheet
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Sent as a DM 💬'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final chats = ref.watch(chatsProvider).chats;
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.62,
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: scheme.outlineVariant,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Row(
+                children: [
+                  Text(
+                    'Share to…',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: chats.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No conversations yet.\nStart a chat first, then share here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      itemCount: chats.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                      itemBuilder: (context, index) {
+                        final chat = chats[index];
+                        return ListTile(
+                          leading: NexoraAvatar(
+                            imageUrl: chat.participant.avatarUrl,
+                            fallbackText: chat.participant.username,
+                            size: 48,
+                            online: chat.participant.isOnline,
+                          ),
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  chat.participant.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              TrustBadge(
+                                label: chat.participant.effectiveTrustLabel,
+                                compact: true,
+                              ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            '@${chat.participant.username}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => _send(context, ref, chat.id),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ShareTarget extends StatelessWidget {
-  const _ShareTarget({required this.icon, required this.label, required this.color});
+  const _ShareTarget({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
 
   final IconData icon;
   final String label;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Icon(icon, color: color, size: 24),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
-      ],
+      ),
     );
   }
 }
@@ -397,11 +608,12 @@ const List<String> _reportReasons = [
   'Other',
 ];
 
-/// Opens the report sheet for a post. Submits to `POST /reports`.
-Future<void> showReportSheet(BuildContext context, Post post) {
+/// Opens the report sheet for a post (or reel) by id. Submits to
+/// `POST /reports` with the real target.
+Future<void> showReportSheet(BuildContext context, String postId) {
   return showNexoraSheet<void>(
     context,
-    builder: (context) => _ReportContent(postId: post.id),
+    builder: (context) => _ReportContent(postId: postId),
   ).then((_) => null);
 }
 

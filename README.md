@@ -58,7 +58,7 @@ docker compose up --build
 | Authentication | Firebase Authentication, JWT            | Identity provider integration & API authorisation    |
 | Media          | Cloudinary                              | Media storage and CDN delivery                       |
 | Caching        | Redis                                   | Optional caching for repeated or short-lived results |
-| Verification   | Google Fact Check Tools API             | Known claim-review lookup and verification evidence  |
+| Verification   | Google Gemini (via AI service)          | LLM fact-check lookup and content review evidence     |
 | Development    | Git/GitHub, VS Code, Docker             | Version control, development & containerisation      |
 
 ## Trust System

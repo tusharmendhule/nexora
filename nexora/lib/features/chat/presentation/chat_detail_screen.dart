@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../app/router/routes.dart';
 import '../../../app/theme/app_colors.dart';
@@ -64,6 +65,29 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
     await ref.read(chatsProvider.notifier).sendMessage(widget.chatId, text);
     _composer.clear();
     _scrollToBottom();
+  }
+
+  /// Pick a photo from the gallery and send it as an image message.
+  Future<void> _attachPhoto() async {
+    try {
+      final file =
+          await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      await ref
+          .read(chatsProvider.notifier)
+          .sendImageMessage(widget.chatId, bytes,
+              filename: file.name);
+      _scrollToBottom();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not send that photo. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -152,39 +176,46 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
               ),
             ),
             Expanded(
-              child: ListView.builder(
-                controller: _scroll,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                itemCount: chat.messages.length + 1,
-                itemBuilder: (context, index) {
-                  if (index == chat.messages.length) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+              child: chat.messages.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.forum_outlined,
+                            size: 44,
+                            color: scheme.outline,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'No messages yet',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurfaceVariant,
                             ),
-                            SizedBox(width: 10),
-                            Text('typing…', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Say hello to @${peer.username} 👋',
+                            style: TextStyle(color: scheme.outline),
+                          ),
+                        ],
                       ),
-                    );
-                  }
-                  final message = chat.messages[index];
-                  final meId = ref.read(authProvider).user?.id;
-                  return ChatBubble(
-                    message: message,
-                    isMine: meId != null && message.senderId == meId,
-                    trustColor: trustColor,
-                  );
-                },
-              ),
+                    )
+                  : ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      itemCount: chat.messages.length,
+                      itemBuilder: (context, index) {
+                        final message = chat.messages[index];
+                        final meId = ref.read(authProvider).user?.id;
+                        return ChatBubble(
+                          message: message,
+                          isMine: meId != null && message.senderId == meId,
+                          trustColor: trustColor,
+                        );
+                      },
+                    ),
             ),
             // Composer
             Container(
@@ -198,8 +229,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.add_circle_outline_rounded),
+                    onPressed: _attachPhoto,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
                   ),
                   Expanded(
                     child: TextField(

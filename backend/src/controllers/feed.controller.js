@@ -3,6 +3,7 @@ import { TrustResult } from "../models/TrustResult.js";
 import { Story } from "../models/Story.js";
 import { cache } from "../services/redis.service.js";
 import { shapePosts } from "./posts.controller.js";
+import { getSettings } from "./admin.controller.js";
 
 /** Build the home feed: visible posts with trust labels + user interaction flags. */
 export async function getFeed(req, res, next) {
@@ -74,6 +75,13 @@ export async function getStories(req, res, next) {
 /** Create a story (image upload, expires in 24h). */
 export async function createStory(req, res, next) {
   try {
+    // Maintenance mode makes the platform read-only for members.
+    const settings = await getSettings();
+    if (settings.maintenanceMode && req.user.role !== "admin") {
+      return res.status(503).json({
+        error: "Nexora is in maintenance mode — stories are temporarily disabled.",
+      });
+    }
     const file = req.files?.[0] ?? req.file;
     if (!file) return res.status(400).json({ error: "story image required" });
     const uploaded = await mediaUpload(req, file);

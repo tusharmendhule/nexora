@@ -6,7 +6,7 @@ Model inference and NLP processing for Nexora trust scoring and verification.
 
 - **FastAPI** (async) with automatic OpenAPI docs
 - **Hugging Face transformers / PyTorch** for model inference (optional local install)
-- **Google Fact Check Tools API** for claim-review lookup
+- **Google Gemini** for claim-review lookup + LLM content review (set `GEMINI_API_KEY` in `.env` — see `.env.example`)
 - Graceful **heuristic fallback** when models aren't installed
 
 ## Setup
@@ -38,5 +38,6 @@ app/
 ├── routes/v1.py       # /v1/analyze, /v1/factcheck
 └── services/
     ├── nlp.py         # transformers inference + heuristic fallback
-    └── factcheck.py   # Google Fact Check Tools client
+    ├── content_review.py # Gemini LLM content checks (optional)
+    └── factcheck.py   # Gemini fact-check client (optional)
 ```

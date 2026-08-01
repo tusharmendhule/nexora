@@ -17,15 +17,33 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
-  bool _maintenance = false;
-  bool _aiTriage = true;
-  bool _verifiedOnlyExplore = false;
+  void _setSetting(AdminSettings next) async {
+    final messenger = ScaffoldMessenger.of(context);
+    // saveSettings sets settings = next on success and reverts to the
+    // previous values on failure, so a single comparison tells us the truth.
+    await ref.read(adminProvider.notifier).saveSettings(next);
+    final saved = ref.read(adminProvider).settings;
+    final applied =
+        saved.maintenanceMode == next.maintenanceMode &&
+        saved.verifiedOnlyExplore == next.verifiedOnlyExplore &&
+        saved.aiTriage == next.aiTriage;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(applied
+            ? 'Settings saved — applied platform-wide ✅'
+            : 'Could not save settings. Please try again.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final state = ref.watch(adminProvider);
     final stats = state.stats;
+    final settings = state.settings;
+    final saving = state.saving;
 
     if (state.isLoading) {
       return Scaffold(
@@ -234,22 +252,34 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                 children: [
                   SwitchListTile(
                     title: const Text('AI trust triage', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    subtitle: const Text('Auto-triage low-risk reports'),
-                    value: _aiTriage,
-                    onChanged: (v) => setState(() => _aiTriage = v),
+                    subtitle: Text(settings.aiTriage
+                        ? 'Auto-flags severe AI content checks for review'
+                        : 'Disabled — AI flags are not auto-triaged'),
+                    value: settings.aiTriage,
+                    onChanged: saving
+                        ? null
+                        : (v) => _setSetting(settings.copyWith(aiTriage: v)),
                   ),
                   SwitchListTile(
                     title: const Text('Verified-only Explore', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    subtitle: const Text('Prioritize verified creators'),
-                    value: _verifiedOnlyExplore,
-                    onChanged: (v) => setState(() => _verifiedOnlyExplore = v),
+                    subtitle: Text(settings.verifiedOnlyExplore
+                        ? 'Explore shows verified creators only'
+                        : 'Explore shows all visible posts'),
+                    value: settings.verifiedOnlyExplore,
+                    onChanged: saving
+                        ? null
+                        : (v) => _setSetting(settings.copyWith(verifiedOnlyExplore: v)),
                   ),
                   SwitchListTile(
                     title: const Text('Maintenance mode', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.trustRed)),
-                    subtitle: const Text('Read-only for all members'),
-                    value: _maintenance,
+                    subtitle: Text(settings.maintenanceMode
+                        ? 'Members cannot post or create stories'
+                        : 'Read-only for all members'),
+                    value: settings.maintenanceMode,
                     activeTrackColor: AppColors.trustRed,
-                    onChanged: (v) => setState(() => _maintenance = v),
+                    onChanged: saving
+                        ? null
+                        : (v) => _setSetting(settings.copyWith(maintenanceMode: v)),
                   ),
                 ],
               ),

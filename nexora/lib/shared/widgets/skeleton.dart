@@ -117,21 +117,25 @@ class StorySkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(
-        6,
-        (_) => const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 6),
-          child: Column(
-            children: [
-              SkeletonBox(
-                width: 62,
-                height: 62,
-                radius: BorderRadius.all(Radius.circular(31)),
-              ),
-              SizedBox(height: 8),
-              SkeletonBox(width: 48, height: 10),
-            ],
+    // Horizontally scrollable so it never overflows on narrow screens.
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: List.generate(
+          6,
+          (_) => const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Column(
+              children: [
+                SkeletonBox(
+                  width: 62,
+                  height: 62,
+                  radius: BorderRadius.all(Radius.circular(31)),
+                ),
+                SizedBox(height: 8),
+                SkeletonBox(width: 48, height: 10),
+              ],
+            ),
           ),
         ),
       ),

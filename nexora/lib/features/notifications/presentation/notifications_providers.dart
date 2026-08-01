@@ -80,6 +80,7 @@ class NotificationsNotifier extends Notifier<NotificationsState> {
   }
 
   Future<void> markAllRead() async {
+    final unreadIds = state.items.where((n) => !n.isRead).map((n) => n.id).toSet();
     state = state.copyWith(
       items: [
         for (final n in state.items)
@@ -97,7 +98,28 @@ class NotificationsNotifier extends Notifier<NotificationsState> {
     );
     try {
       await ref.watch(apiClientProvider).post('/notifications/read-all');
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      // Server never marked them read — restore the unread state so the UI
+      // badge reflects reality.
+      state = state.copyWith(
+        items: [
+          for (final n in state.items)
+            if (unreadIds.contains(n.id))
+              AppNotification(
+                id: n.id,
+                type: n.type,
+                user: n.user,
+                text: n.text,
+                createdAt: n.createdAt,
+                postPreview: n.postPreview,
+                isRead: false,
+                isTrustEvent: n.isTrustEvent,
+              )
+            else
+              n,
+        ],
+      );
+    }
   }
 
   Future<void> markRead(String id) async {
@@ -121,7 +143,27 @@ class NotificationsNotifier extends Notifier<NotificationsState> {
     );
     try {
       await ref.watch(apiClientProvider).post('/notifications/$id/read');
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      // Revert to unread when the server call fails.
+      state = state.copyWith(
+        items: [
+          for (final n in state.items)
+            if (n.id == id)
+              AppNotification(
+                id: n.id,
+                type: n.type,
+                user: n.user,
+                text: n.text,
+                createdAt: n.createdAt,
+                postPreview: n.postPreview,
+                isRead: false,
+                isTrustEvent: n.isTrustEvent,
+              )
+            else
+              n,
+        ],
+      );
+    }
   }
 }
 

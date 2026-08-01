@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/app_colors.dart';
@@ -46,14 +47,47 @@ class ChatBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              message.text,
-              style: TextStyle(
-                fontSize: 14.5,
-                height: 1.35,
-                color: isMine ? Colors.white : scheme.onSurface,
+            if (message.type == MessageType.image)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: message.text.isEmpty
+                    ? Container(
+                        width: 160,
+                        height: 160,
+                        color: scheme.surfaceContainerHighest,
+                        child: const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : CachedNetworkImage(
+                        imageUrl: message.text,
+                        width: 200,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => Container(
+                          width: 200,
+                          height: 160,
+                          color: scheme.surfaceContainerHighest,
+                          child: const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                        errorWidget: (_, __, ___) => Container(
+                          width: 200,
+                          height: 120,
+                          color: scheme.surfaceContainerHighest,
+                          child: const Icon(Icons.broken_image_rounded),
+                        ),
+                      ),
+              )
+            else
+              Text(
+                message.text,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  height: 1.35,
+                  color: isMine ? Colors.white : scheme.onSurface,
+                ),
               ),
-            ),
             const SizedBox(height: 3),
             Row(
               mainAxisSize: MainAxisSize.min,

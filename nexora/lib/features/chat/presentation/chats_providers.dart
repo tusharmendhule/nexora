@@ -1,3 +1,4 @@
+import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -49,9 +50,84 @@ class ChatsNotifier extends Notifier<ChatsState> {
     return null;
   }
 
-  Future<void> sendMessage(String chatId, String text) async {
+  /// Find-or-create a conversation with another member and return its id.
+  Future<String?> startConversation(String userId) async {
+    try {
+      final json = await ref
+          .watch(apiClientProvider)
+          .post('/chat', body: {'userId': userId});
+      final id = (json as Map<String, dynamic>?)?['conversationId'] as String?;
+      if (id != null) refresh();
+      return id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Send an image message (uploaded to Cloudinary via the API).
+  Future<void> sendImageMessage(String chatId, List<int> bytes,
+      {String filename = 'chat.jpg'}) async {
     final chat = chatById(chatId);
-    if (chat == null || text.trim().isEmpty) return;
+    if (chat == null) return;
+    final me = ref.read(authProvider).user;
+    final message = Message(
+      id: 'm_${DateTime.now().millisecondsSinceEpoch}',
+      senderId: me?.id ?? 'me',
+      text: '',
+      type: MessageType.image,
+      createdAt: DateTime.now(),
+    );
+    state = state.copyWith(
+      chats: [
+        for (final c in state.chats)
+          if (c.id == chatId)
+            Chat(
+              id: c.id,
+              participant: c.participant,
+              messages: [...c.messages, message],
+              unread: c.unread,
+            )
+          else
+            c,
+      ],
+    );
+    try {
+      final json = await ref.watch(apiClientProvider).postMultipart(
+            '/chat/$chatId/messages',
+            files: [
+              http.MultipartFile.fromBytes('image', bytes, filename: filename),
+            ],
+          );
+      final created =
+          (json as Map<String, dynamic>?)?['message'] as Map<String, dynamic>?;
+      if (created != null) {
+        final sent = Message.fromApi(created);
+        state = state.copyWith(
+          chats: [
+            for (final c in state.chats)
+              if (c.id == chatId)
+                Chat(
+                  id: c.id,
+                  participant: c.participant,
+                  messages: [
+                    for (final m in c.messages)
+                      if (m.id == message.id) sent else m,
+                  ],
+                  unread: c.unread,
+                )
+              else
+                c,
+          ],
+        );
+      }
+    } catch (_) {/* keep local copy */}
+  }
+
+  /// Sends a text message. Returns true only when the server confirmed it
+  /// (the optimistic local copy is kept on failure, matching chat behavior).
+  Future<bool> sendMessage(String chatId, String text) async {
+    final chat = chatById(chatId);
+    if (chat == null || text.trim().isEmpty) return false;
     final me = ref.read(authProvider).user;
     final message = Message(
       id: 'm_${DateTime.now().millisecondsSinceEpoch}',
@@ -98,8 +174,13 @@ class ChatsNotifier extends Notifier<ChatsState> {
                 c,
           ],
         );
+        return true;
       }
-    } catch (_) {/* keep local copy */}
+      return false;
+    } catch (_) {
+      // Keep the optimistic local copy so the thread stays consistent.
+      return false;
+    }
   }
 
   /// Real-time: append an incoming message pushed by the Socket.IO gateway.
@@ -111,6 +192,7 @@ class ChatsNotifier extends Notifier<ChatsState> {
       'id': payload['id'],
       'senderId': payload['senderId'],
       'text': payload['text'],
+      'type': payload['type'],
       'createdAt': payload['createdAt'],
       'isRead': payload['isRead'] == true,
     });

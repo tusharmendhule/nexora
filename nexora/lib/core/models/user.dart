@@ -116,6 +116,7 @@ class User {
       isAiVerified: json['isVerified'] == true || json['isAiVerified'] == true,
       isAdmin: json['role'] == 'admin',
       isModerator: json['role'] == 'moderator',
+      isFollowing: json['isFollowing'] == true,
       followers: (json['followers'] as num?)?.toInt() ?? 0,
       following: (json['following'] as num?)?.toInt() ?? 0,
       posts: (json['posts'] as num?)?.toInt() ?? 0,

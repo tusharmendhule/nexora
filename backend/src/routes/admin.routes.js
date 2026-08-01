@@ -1,6 +1,8 @@
 import { Router } from "express";
 import {
   getAdminStats,
+  getAdminSettings,
+  updateAdminSettings,
   listUsers,
   updateUserRole,
   toggleUserBan,
@@ -14,6 +16,18 @@ const router = Router();
 router.use(requireAuth, requireAdmin);
 
 router.get("/stats", getAdminStats);
+router.get("/settings", getAdminSettings);
+router.put(
+  "/settings",
+  validate(
+    z.object({
+      maintenanceMode: z.boolean().optional(),
+      verifiedOnlyExplore: z.boolean().optional(),
+      aiTriage: z.boolean().optional(),
+    }),
+  ),
+  updateAdminSettings,
+);
 router.get("/users", listUsers);
 router.patch(
   "/users/:id/role",

@@ -4,8 +4,10 @@ import { Post } from "../models/Post.js";
 import { TrustResult } from "../models/TrustResult.js";
 import { Bookmark } from "../models/Bookmark.js";
 import { Notification } from "../models/Notification.js";
+import { Block } from "../models/Block.js";
 import { toUserResponse } from "./auth.controller.js";
 import { emitToUser } from "../services/socket.service.js";
+import { getSettings } from "./admin.controller.js";
 
 /** Search users, posts and hashtags with a single query. */
 export async function searchAll(req, res, next) {
@@ -58,7 +60,14 @@ export async function searchAll(req, res, next) {
 /** Explore: trending posts + trending hashtags. */
 export async function explore(req, res, next) {
   try {
-    const posts = await Post.find({ moderationStatus: "visible" })
+    const settings = await getSettings();
+    const filter = { moderationStatus: "visible" };
+    // Verified-only Explore: surface posts from verified creators only.
+    if (settings.verifiedOnlyExplore) {
+      const verified = await User.find({ isVerified: true }).select("_id");
+      filter.author = { $in: verified.map((u) => u._id) };
+    }
+    const posts = await Post.find(filter)
       .sort({ likesCount: -1, createdAt: -1 })
       .limit(30)
       .populate("author", "name avatar username trustLabel trustScore isVerified")
@@ -208,6 +217,59 @@ export async function getUserProfile(req, res, next) {
   }
 }
 
+/**
+ * Shared list builder for followers / following.
+ *
+ * [queryField] is the Follow document field that must equal the target user
+ * (`following` → list their followers; `follower` → list who they follow) and
+ * [populatePath] the field to resolve into user documents.
+ */
+async function listFollows(req, res, next, { queryField, populatePath }) {
+  try {
+    const user = await resolveUser(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const follows = await Follow.find({ [queryField]: user._id })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .populate(
+        populatePath,
+        "name avatar username trustLabel trustScore bio isVerified role followersCount followingCount",
+      )
+      .lean();
+
+    // Attach per-viewer `isFollowing` so the client can render follow buttons.
+    const ids = follows.map((f) => f[populatePath]?._id).filter(Boolean);
+    const viewerFollows = await Follow.find({
+      follower: req.user._id,
+      following: { $in: ids },
+    }).select("following");
+    const followingSet = new Set(viewerFollows.map((f) => f.following.toString()));
+
+    const data = follows
+      .map((f) => f[populatePath])
+      .filter(Boolean)
+      .map((member) => ({
+        ...toUserResponse(member),
+        isFollowing: followingSet.has(member._id.toString()),
+      }));
+
+    res.json({ data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** List the accounts that follow a user (newest first). */
+export async function listFollowers(req, res, next) {
+  return listFollows(req, res, next, { queryField: "following", populatePath: "follower" });
+}
+
+/** List the accounts a user follows (newest first). */
+export async function listFollowing(req, res, next) {
+  return listFollows(req, res, next, { queryField: "follower", populatePath: "following" });
+}
+
 /** Follow or unfollow a user. */
 export async function toggleFollow(req, res, next) {
   try {
@@ -248,6 +310,53 @@ export async function toggleFollow(req, res, next) {
       createdAt: notification.createdAt,
     });
     res.json({ following: true, followers: target.followersCount + 1 });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* ── Blocking ────────────────────────────────────────────────────────── */
+
+/** Block (or unblock) a user. Blocking hides their content and DMs. */
+export async function toggleBlock(req, res, next) {
+  try {
+    const target = await resolveUser(req.params.id);
+    if (!target) return res.status(404).json({ error: "User not found" });
+    if (target._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ error: "You cannot block yourself" });
+    }
+
+    const existing = await Block.findOne({ blocker: req.user._id, blocked: target._id });
+    if (existing) {
+      await Block.deleteOne({ _id: existing._id });
+      return res.json({ blocked: false });
+    }
+
+    await Block.create({ blocker: req.user._id, blocked: target._id });
+    // Unfollow each other so blocked users stop appearing in the graph.
+    await Follow.deleteMany({
+      $or: [
+        { follower: req.user._id, following: target._id },
+        { follower: target._id, following: req.user._id },
+      ],
+    });
+    res.json({ blocked: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** List the accounts the current user has blocked. */
+export async function listBlocked(req, res, next) {
+  try {
+    const blocks = await Block.find({ blocker: req.user._id })
+      .sort({ createdAt: -1 })
+      .populate("blocked", "name avatar username trustLabel trustScore bio")
+      .lean();
+    const data = blocks
+      .filter((b) => b.blocked)
+      .map((b) => toUserResponse(b.blocked));
+    res.json({ data });
   } catch (err) {
     next(err);
   }

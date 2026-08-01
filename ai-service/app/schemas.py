@@ -12,6 +12,21 @@ class Factor(BaseModel):
     detail: str = ""
 
 
+class ContentCheck(BaseModel):
+    """A single AI content-analysis dimension (fake news, hate speech, ...).
+
+    `score` is a risk probability 0-100; `level` buckets it for the UI:
+    none / low / medium / high. `flags` lists the specific signals found.
+    """
+
+    name: str = ""
+    label: str = ""
+    score: float = Field(..., ge=0, le=100)
+    level: str = "none"
+    flags: list[str] = []
+    detail: str = ""
+
+
 class FactCheckEvidence(BaseModel):
     publisher: str = ""
     title: str = ""
@@ -25,6 +40,7 @@ class AnalyzeResponse(BaseModel):
     label: str
     factors: list[Factor] = []
     factChecks: list[FactCheckEvidence] = []
+    checks: list[ContentCheck] = []
 
 
 class FactCheckItem(BaseModel):

@@ -1,5 +1,40 @@
 import '../../../core/models/user.dart';
 
+/// One of the six AI content checks (fake news, hate speech, toxic language,
+/// clickbait, spam, offensive content) with its risk score + level.
+class ContentCheck {
+  const ContentCheck({
+    required this.name,
+    this.label = '',
+    this.score = 0,
+    this.level = 'none',
+    this.flags = const [],
+    this.detail = '',
+  });
+
+  final String name;
+  final String label;
+  final double score; // risk probability 0-100
+  final String level; // none | low | medium | high
+  final List<String> flags; // matched signals
+  final String detail;
+
+  bool get isFlagged => level != 'none';
+  bool get isHigh => level == 'high';
+
+  factory ContentCheck.fromApi(Map<String, dynamic>? json) {
+    if (json == null) return const ContentCheck(name: '');
+    return ContentCheck(
+      name: (json['name'] as String?) ?? '',
+      label: (json['label'] as String?) ?? '',
+      score: ((json['score'] as num?) ?? 0).toDouble(),
+      level: (json['level'] as String?) ?? 'none',
+      flags: (json['flags'] as List?)?.cast<String>() ?? const [],
+      detail: (json['detail'] as String?) ?? '',
+    );
+  }
+}
+
 /// Trust result attached to a post (score + color label + factors + evidence).
 class TrustInfo {
   const TrustInfo({
@@ -7,6 +42,7 @@ class TrustInfo {
     required this.label,
     this.factors = const [],
     this.factChecks = const [],
+    this.checks = const [],
     this.status = 'pending',
   });
 
@@ -14,7 +50,16 @@ class TrustInfo {
   final String label; // Verified | Vetted | Premium | Watch | Restricted
   final List<Map<String, dynamic>> factors;
   final List<Map<String, dynamic>> factChecks;
+
+  /// The six AI content checks with per-category risk levels.
+  final List<ContentCheck> checks;
+
   final String status;
+
+  /// Checks that did NOT pass (level low/medium/high) — the reason a post may
+  /// have been flagged.
+  List<ContentCheck> get flaggedChecks =>
+      checks.where((c) => c.isFlagged).toList();
 
   TrustLabel get trustLabel {
     switch (label) {
@@ -41,6 +86,10 @@ class TrustInfo {
       factors: (json['factors'] as List?)?.cast<Map<String, dynamic>>() ?? const [],
       factChecks:
           (json['factChecks'] as List?)?.cast<Map<String, dynamic>>() ?? const [],
+      checks: (json['checks'] as List?)
+              ?.map((c) => ContentCheck.fromApi(c as Map<String, dynamic>?))
+              .toList() ??
+          const [],
       status: (json['status'] as String?) ?? 'pending',
     );
   }
@@ -152,6 +201,12 @@ class Post {
   bool get isVideo => videoUrl != null;
   bool get isCarousel => images.length > 1;
 
+  /// The single image (or video) used as this post's grid thumbnail, or
+  /// null for text-only posts. Guards against calling `images.first` on an
+  /// empty list — the crash that used to take down the feed.
+  String? get thumbnail =>
+      isVideo ? videoUrl : (images.isNotEmpty ? images.first : null);
+
   factory Post.fromApi(Map<String, dynamic> json) {
     final media = (json['media'] as List?) ?? const [];
     final images = <String>[];
@@ -204,6 +259,7 @@ class Post {
   }
 
   Post copyWith({
+    User? author,
     int? likes,
     int? comments,
     int? shares,
@@ -216,7 +272,7 @@ class Post {
   }) {
     return Post(
       id: id,
-      author: author,
+      author: author ?? this.author,
       caption: caption,
       images: images,
       videoUrl: videoUrl,

@@ -28,7 +28,7 @@ final _rootNavigatorKey = GlobalKey<NavigatorState>();
 /// Nexora's navigation graph.
 ///
 /// * `/splash` is the entry; it routes to onboarding / login / home based on
-///   the mocked auth state.
+///   the real auth state from the API-backed auth provider.
 /// * `/home`, `/explore`, `/create`, `/reels` and `/profile` live inside a
 ///   [StatefulShellRoute.indexedStack] so each tab keeps its scroll position.
 /// * Everything else is a full-screen destination pushed on the root navigator.

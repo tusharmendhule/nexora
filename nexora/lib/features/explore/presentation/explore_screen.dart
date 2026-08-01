@@ -142,7 +142,7 @@ class _ExploreTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final media = post.isVideo ? post.videoUrl : post.images.firstOrNull;
+    final media = post.thumbnail;
     return Stack(
       fit: StackFit.expand,
       children: [

@@ -7,16 +7,37 @@ from app.schemas import (
     FactCheckResponse,
 )
 from app.services.factcheck import search_fact_checks
-from app.services.nlp import analyze_text
+from app.services.nlp import (
+    analyze_text,
+    factors_for_checks,
+    label_for_checks,
+    score_for_checks,
+)
+from app.services.content_review import review_content
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
-    """Analyze post text and return a trust score + label + factors,
-    enriched with Gemini fact-check evidence when a key is configured."""
+    """Analyze post text and return a trust score + label + factors + six
+    content checks (fake news, hate speech, toxic language, clickbait, spam,
+    offensive content), enriched with Gemini when a key is configured."""
     result = analyze_text(req.text, req.language)
+
+    # Refine the six checks with an LLM pass when a key is available; the
+    # heuristic checks are already in `result` as a guaranteed fallback.
+    refined = await review_content(req.text)
+    if refined:
+        result["checks"] = refined
+        result["score"] = score_for_checks(refined)
+        result["label"] = label_for_checks(refined, result["score"])
+        # Keep the factors in sync with the refined checks so downstream
+        # consumers (Trust Center) never see stale heuristic levels.
+        result["factors"] = [
+            *factors_for_checks(refined),
+            *(f for f in result.get("factors", []) if f.get("name") == "sentiment"),
+        ]
 
     # Enrich with real fact-check evidence (only when a key is available).
     if req.text.strip():
@@ -35,10 +56,14 @@ async def analyze(req: AnalyzeRequest):
                 lowest = checks[0]["rating"].lower()
                 if any(r in lowest for r in true_ratings):
                     result["score"] = round(min(100.0, result["score"] + 5), 1)
-                    result["label"] = _label_for_score(result["score"])
+                    result["label"] = label_for_checks(
+                        result["checks"], result["score"]
+                    )
                 elif any(r in lowest for r in false_ratings):
                     result["score"] = round(max(0.0, result["score"] - 12), 1)
-                    result["label"] = _label_for_score(result["score"])
+                    result["label"] = label_for_checks(
+                        result["checks"], result["score"]
+                    )
                 result["factors"] = [
                     *result.get("factors", []),
                     {
@@ -51,16 +76,6 @@ async def analyze(req: AnalyzeRequest):
             print(f"[analyze] fact-check enrichment skipped: {exc}")
 
     return AnalyzeResponse(**result)
-
-
-def _label_for_score(score: float) -> str:
-    if score >= 75:
-        return "Verified"
-    if score >= 60:
-        return "Vetted"
-    if score >= 40:
-        return "Watch"
-    return "Restricted"
 
 
 @router.get("/factcheck", response_model=FactCheckResponse)

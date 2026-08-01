@@ -49,10 +49,38 @@ class AuthState {
 
 class AuthNotifier extends Notifier<AuthState> {
   late final AuthRepository _repository = ref.watch(authRepositoryProvider);
+  Future<void>? _restoreFuture;
 
   @override
   AuthState build() {
+    // When the access token can no longer be renewed, drop the session.
+    ref.read(apiClientProvider).onSessionExpired = () {
+      state = state.copyWith(user: null, isLoading: false);
+    };
+    // Restore a persisted session (token + user) so users stay signed in.
+    _restoreFuture ??= _restoreSession();
     return const AuthState();
+  }
+
+  /// Completes once the persisted-session restore has settled. The splash
+  /// screen awaits this before routing so it never flashes the login screen
+  /// to an already-authenticated user.
+  Future<void> ensureRestored() => _restoreFuture ?? Future.value();
+
+  Future<void> _restoreSession() async {
+    try {
+      final user = await _repository.restoreSession();
+      if (user != null) {
+        ref.read(socketServiceProvider).connect();
+        state = state.copyWith(
+          user: user,
+          isOnboarded: true,
+          isAgeVerified: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('session restore failed: $e');
+    }
   }
 
   void completeOnboarding() => state = state.copyWith(isOnboarded: true);

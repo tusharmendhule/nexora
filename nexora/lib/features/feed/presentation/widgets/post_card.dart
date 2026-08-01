@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/app_colors.dart';
+import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/avatar.dart';
 import '../../../../shared/widgets/bottom_sheets.dart';
@@ -69,13 +70,31 @@ class _PostCardState extends ConsumerState<PostCard> {
               color: Colors.redAccent,
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                showReportSheet(context, post);
+                showReportSheet(context, post.id);
               },
             ),
             _MenuTile(
               icon: Icons.person_add_alt_1_rounded,
-              label: post.author.isFollowing ? 'Unfollow @${post.author.username}' : 'Follow @${post.author.username}',
-              onTap: () => Navigator.of(sheetContext).pop(),
+              label: post.author.isFollowing
+                  ? 'Unfollow @${post.author.username}'
+                  : 'Follow @${post.author.username}',
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                final messenger = ScaffoldMessenger.of(context);
+                final ok = await ref
+                    .read(feedProvider.notifier)
+                    .toggleFollowAuthor(post.author.id);
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(ok
+                        ? (post.author.isFollowing
+                            ? 'Unfollowed @${post.author.username}'
+                            : 'Following @${post.author.username}')
+                        : 'Could not update follow. Please try again.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
             ),
             _MenuTile(
               icon: Icons.link_rounded,
@@ -97,7 +116,31 @@ class _PostCardState extends ConsumerState<PostCard> {
               icon: Icons.block_rounded,
               label: 'Block @${post.author.username}',
               color: Colors.redAccent,
-              onTap: () => Navigator.of(sheetContext).pop(),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                final messenger = ScaffoldMessenger.of(context);
+                try {
+                  await ref
+                      .read(apiClientProvider)
+                      .post('/users/${post.author.id}/block');
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          '@${post.author.username} is now blocked. You won\'t see their content.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  // Remove the blocked author's posts from the feed.
+                  ref.read(feedProvider.notifier).removePostsByAuthor(post.author.id);
+                } catch (_) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Could not block this account.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
             ),
             const SizedBox(height: 12),
           ],
@@ -209,7 +252,7 @@ class _PostCardState extends ConsumerState<PostCard> {
                 images: post.images,
                 onDoubleTap: _doubleTapLike,
               )
-            else
+            else if (post.images.length == 1)
               GestureDetector(
                 onDoubleTap: _doubleTapLike,
                 child: CachedNetworkImage(
@@ -221,6 +264,56 @@ class _PostCardState extends ConsumerState<PostCard> {
                     height: 420,
                     color: scheme.surfaceContainerHighest,
                     child: const Icon(Icons.broken_image_rounded),
+                  ),
+                ),
+              )
+            else
+              // Text-only post (no media) — render a graceful placeholder
+              // instead of touching `images.first` on an empty list.
+              GestureDetector(
+                onDoubleTap: _doubleTapLike,
+                child: Container(
+                  width: double.infinity,
+                  height: 180,
+                  margin: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        scheme.primary.withValues(alpha: 0.14),
+                        scheme.tertiary.withValues(alpha: 0.10),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.notes_rounded,
+                        size: 28,
+                        color: scheme.primary.withValues(alpha: 0.7),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        post.caption.isNotEmpty
+                            ? post.caption
+                            : 'Share your thoughts with the community…',
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -325,18 +418,29 @@ class _ActionIcon extends StatelessWidget {
   }
 }
 
-/// The AI trust verdict chip for a single post: score + colour label +
-/// fact-check summary from the real analysis pipeline. Shows a pending
+/// The AI trust verdict panel for a single post: score + colour label +
+/// fact-check summary, plus an expandable breakdown of the six AI content
+/// checks so users can see exactly why a post was flagged. Shows a pending
 /// state while the background analysis is still running.
-class _TrustVerdict extends StatelessWidget {
+class _TrustVerdict extends StatefulWidget {
   const _TrustVerdict({required this.trust});
 
   final TrustInfo? trust;
 
   @override
+  State<_TrustVerdict> createState() => _TrustVerdictState();
+}
+
+class _TrustVerdictState extends State<_TrustVerdict> {
+  bool _expanded = false;
+
+  TrustInfo? get trust => widget.trust;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (trust == null || trust!.status == 'pending') {
+    final t = trust;
+    if (t == null || t.status == 'pending') {
       const pendingColor = AppColors.trustOrange;
       return Container(
         width: double.infinity,
@@ -370,61 +474,240 @@ class _TrustVerdict extends StatelessWidget {
       );
     }
 
-    final label = trust!.trustLabel;
+    final label = t.trustLabel;
     final color = label.color;
+    final flagged = t.flaggedChecks;
+    final hasChecks = t.checks.isNotEmpty;
+    final highCount = t.checks.where((c) => c.isHigh).length;
+
+    // Highlight copy when checks flagged the post. Only a high check puts a
+    // post under review; medium/low just lower the trust score.
+    final subtitle = highCount > 0
+        ? '$highCount check${highCount == 1 ? '' : 's'} flagged for review'
+        : flagged.isNotEmpty
+            ? '${flagged.length} signal${flagged.length == 1 ? '' : 's'} found'
+            : (t.factChecks.isNotEmpty
+                ? 'Checked against sources'
+                : (t.factors.isNotEmpty ? 'Analysed by AI' : 'AI verified'));
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: EdgeInsets.fromLTRB(10, 8, 10, hasChecks ? 4 : 8),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.shield_rounded, size: 17, color: color),
-          const SizedBox(width: 8),
-          Text(
-            '${trust!.score.round()} Trust',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w900,
-              color: color,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(99),
-            ),
-            child: Text(
-              label.label,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
+          Row(
+            children: [
+              Icon(Icons.shield_rounded, size: 17, color: color),
+              const SizedBox(width: 8),
+              Text(
+                '${t.score.round()} Trust',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w900,
+                  color: color,
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  label.label,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: highCount > 0
+                        ? AppColors.trustRed
+                        : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (hasChecks) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: _expanded ? 'Hide content analysis' : 'Show content analysis',
+                  child: InkWell(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: AnimatedRotation(
+                        turns: _expanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
+          if (hasChecks) ...[
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: _expanded
+                  ? _ChecksBreakdown(checks: t.checks)
+                  : const SizedBox(height: 0),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Expandable list of the six AI content checks with per-check risk levels.
+class _ChecksBreakdown extends StatelessWidget {
+  const _ChecksBreakdown({required this.checks});
+
+  final List<ContentCheck> checks;
+
+  Color _levelColor(String level) {
+    switch (level) {
+      case 'high':
+        return AppColors.trustRed;
+      case 'medium':
+        return AppColors.trustOrange;
+      case 'low':
+        return AppColors.trustBlue;
+      default:
+        return AppColors.trustGreen;
+    }
+  }
+
+  IconData _levelIcon(String level) {
+    switch (level) {
+      case 'high':
+        return Icons.error_rounded;
+      case 'medium':
+        return Icons.warning_amber_rounded;
+      case 'low':
+        return Icons.info_outline_rounded;
+      default:
+        return Icons.check_circle_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 2),
+          for (final check in checks) _CheckRow(
+            check: check,
+            color: _levelColor(check.level),
+            icon: _levelIcon(check.level),
+            scheme: scheme,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CheckRow extends StatelessWidget {
+  const _CheckRow({
+    required this.check,
+    required this.color,
+    required this.icon,
+    required this.scheme,
+  });
+
+  final ContentCheck check;
+  final Color color;
+  final IconData icon;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = check.label.isNotEmpty ? check.label : check.name;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: color),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              trust!.factChecks.isNotEmpty
-                  ? (trust!.factChecks.first['summary'] as String? ??
-                      'Checked by AI')
-                  : (trust!.factors.isNotEmpty
-                      ? 'Analysed by AI'
-                      : 'AI verified'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${check.score.round()}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: color,
+                      ),
+                    ),
+                  ],
+                ),
+                if (check.flags.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    check.flags.join(', '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ] else if (check.detail.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    check.detail,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

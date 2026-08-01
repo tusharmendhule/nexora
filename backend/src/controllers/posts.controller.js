@@ -4,11 +4,13 @@ import { Comment } from "../models/Comment.js";
 import { Like } from "../models/Like.js";
 import { Bookmark } from "../models/Bookmark.js";
 import { Notification } from "../models/Notification.js";
+import { Report } from "../models/Report.js";
 import { media } from "../services/cloudinary.service.js";
 import { ai } from "../services/ai.service.js";
 import { cache } from "../services/redis.service.js";
 import { emitToUser } from "../services/socket.service.js";
 import { recomputeUserTrust } from "../services/trust.service.js";
+import { getSettings } from "./admin.controller.js";
 
 /** Coerce mention strings/usernames into valid User ObjectIds (drop invalid). */
 async function resolveMentions(mentions) {
@@ -99,6 +101,14 @@ export function toReelShape(post) {
 /** Create a post; optionally upload media and run AI trust + fact-check analysis. */
 export async function createPost(req, res, next) {
   try {
+    // Maintenance mode makes the platform read-only for members.
+    const settings = await getSettings();
+    if (settings.maintenanceMode && req.user.role !== "admin") {
+      return res.status(503).json({
+        error: "Nexora is in maintenance mode — posting is temporarily disabled.",
+      });
+    }
+
     const { caption = "", hashtags = [], mentions = [], location = "" } = req.body;
 
     const mediaList = [];
@@ -121,7 +131,7 @@ export async function createPost(req, res, next) {
       location,
     });
 
-    // Kick off trust analysis + fact-check in the background.
+    // Kick off content analysis + fact-check in the background.
     ai.analyzeText({ text: caption })
       .then(async (result) => {
         const factChecks = (result.factChecks ?? []).map((fc) => ({
@@ -129,27 +139,83 @@ export async function createPost(req, res, next) {
           title: fc.title ?? "",
           url: fc.url ?? "",
           rating: fc.rating ?? "",
-          checkedDate: fc.checkedDate ?? null,
+          checkedDate: fc.checked_date || fc.checkedDate || null,
         }));
+        // The six AI content checks (fake news, hate speech, toxic language,
+        // clickbait, spam, offensive content) with per-category risk scores.
+        const checks = (result.checks ?? []).map((c) => {
+          // Defensive: the AI service always sends lowercase levels, but a
+          // misbehaving upstream must never break the Mongo enum below.
+          const level = String(c.level ?? "").toLowerCase().trim();
+          return {
+            name: c.name ?? "",
+            label: c.label ?? "",
+            score: Math.round(c.score ?? 0),
+            level: ["none", "low", "medium", "high"].includes(level)
+              ? level
+              : "none",
+            flags: Array.isArray(c.flags) ? c.flags.slice(0, 5) : [],
+            detail: c.detail ?? "",
+          };
+        });
+        const score = Math.round(result.score ?? 50);
+        const label = result.label ?? "Watch";
+
         const trust = await TrustResult.create({
           post: post._id,
           userId: req.user._id,
-          score: result.score ?? 50,
-          label: result.label ?? "Watch",
+          score,
+          label,
           factors: result.factors ?? [],
+          checks,
           factChecks,
         });
-        await Post.findByIdAndUpdate(post._id, {
-          trustCheck: {
-            status: result.label === "Restricted" ? "restricted" : result.label === "Watch" ? "flagged" : "verified",
-            score: result.score ?? 50,
-            evidence: factChecks[0]?.title ?? "",
-          },
-        });
+
+        // Flag-only moderation: severe content is pulled from the public feed
+        // and queued for a moderator. It is never auto-removed. The admin can
+        // disable this auto-triage entirely via the AI triage setting.
+        const settings = await getSettings();
+        const triageEnabled = settings.aiTriage !== false;
+        const severe = triageEnabled && checks.some((c) => c.level === "high");
+        const flags = severe
+          ? checks.filter((c) => c.level === "high")
+          : [];
+        if (severe) {
+          await Promise.all([
+            Post.findByIdAndUpdate(post._id, {
+              moderationStatus: "under_review",
+              trustCheck: {
+                status: "flagged",
+                score,
+                evidence: flags.map((f) => f.label).join(", "),
+              },
+            }),
+            Report.create({
+              reporter: req.user._id,
+              targetType: "post",
+              targetId: post._id,
+              reason: "AI content flag",
+              details: flags
+                .map((f) => `${f.label} (${f.score}/100): ${f.detail}`)
+                .join(" | "),
+            }),
+          ]);
+        } else {
+          await Post.findByIdAndUpdate(post._id, {
+            trustCheck: {
+              status: label === "Restricted" ? "restricted" : label === "Watch" ? "flagged" : "verified",
+              score,
+              evidence: factChecks[0]?.title ?? "",
+            },
+          });
+        }
+
         await Notification.create({
           user: req.user._id,
           type: "trust",
-          text: `Your post's trust analysis scored ${Math.round(result.score ?? 50)} — ${result.label}.`,
+          text: severe
+            ? `Your post was flagged by AI content analysis and is under review (${flags.map((f) => f.label).join(", ")}).`
+            : `Your post's trust analysis scored ${score} — ${label}.`,
           isTrustEvent: true,
           post: post._id,
         });
@@ -158,7 +224,7 @@ export async function createPost(req, res, next) {
         await cache.delPattern(`feed:*`);
         return trust;
       })
-      .catch((err) => console.warn("[posts] trust analysis failed:", err.message));
+      .catch((err) => console.warn("[posts] content analysis failed:", err.message));
 
     res.status(201).json({ post: await shapePost(post, req.user._id.toString()) });
   } catch (err) {

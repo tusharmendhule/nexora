@@ -44,35 +44,11 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
   }
 
   void _openShareSheet(Reel reel) {
-    showNexoraSheet(
-      context,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Share reel',
-              style: Theme.of(sheetContext)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 16),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _SharePill(icon: Icons.link_rounded, label: 'Copy link', color: AppColors.brand),
-                _SharePill(icon: Icons.chat_rounded, label: 'Nexora DM', color: AppColors.accentCyan),
-                _SharePill(icon: Icons.telegram_rounded, label: 'Telegram', color: AppColors.trustBlue),
-                _SharePill(icon: Icons.camera_alt_rounded, label: 'Stories', color: AppColors.trustPurple),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+    showReelShareSheet(context, reel.id, reel.caption);
+  }
+
+  void _openMore(Reel reel) {
+    showReportSheet(context, reel.id);
   }
 
   @override
@@ -113,6 +89,7 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
                           scrollControlled: true,
                         );
                       },
+                      onMore: () => _openMore(reel),
                     );
                   },
                 ),
@@ -159,6 +136,7 @@ class _ReelPage extends StatelessWidget {
     required this.onBookmark,
     required this.onShare,
     required this.onComment,
+    required this.onMore,
   });
 
   final Reel reel;
@@ -168,6 +146,7 @@ class _ReelPage extends StatelessWidget {
   final VoidCallback onBookmark;
   final VoidCallback onShare;
   final VoidCallback onComment;
+  final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) {
@@ -297,7 +276,7 @@ class _ReelPage extends StatelessWidget {
                 icon: Icons.more_horiz_rounded,
                 color: Colors.white,
                 label: '',
-                onTap: () {},
+                onTap: onMore,
               ),
             ],
           ),
@@ -337,34 +316,6 @@ class _RailAction extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _SharePill extends StatelessWidget {
-  const _SharePill({required this.icon, required this.label, required this.color});
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Icon(icon, color: color, size: 24),
-        ),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
-      ],
     );
   }
 }

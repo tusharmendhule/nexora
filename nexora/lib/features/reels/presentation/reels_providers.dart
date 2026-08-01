@@ -46,36 +46,67 @@ class ReelsNotifier extends Notifier<ReelsState> {
   void setIndex(int index) => state = state.copyWith(currentIndex: index);
 
   Future<void> toggleLike(String reelId) async {
+    final reel = state.reels.where((r) => r.id == reelId).firstOrNull;
+    if (reel == null) return;
+    final wasLiked = reel.isLiked;
     state = state.copyWith(
       reels: [
-        for (final reel in state.reels)
-          if (reel.id == reelId)
-            reel.copyWith(
-              isLiked: !reel.isLiked,
-              likes: reel.likes + (reel.isLiked ? -1 : 1),
+        for (final r in state.reels)
+          if (r.id == reelId)
+            r.copyWith(
+              isLiked: !r.isLiked,
+              likes: r.likes + (r.isLiked ? -1 : 1),
             )
           else
-            reel,
+            r,
       ],
     );
     try {
       await ref.watch(apiClientProvider).post('/posts/$reelId/like');
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      // Server rejected the toggle — revert so the UI matches reality.
+      state = state.copyWith(
+        reels: [
+          for (final r in state.reels)
+            if (r.id == reelId)
+              r.copyWith(
+                isLiked: wasLiked,
+                likes: r.likes + (wasLiked ? 1 : -1),
+              )
+            else
+              r,
+        ],
+      );
+    }
   }
 
   Future<void> toggleBookmark(String reelId) async {
+    final reel = state.reels.where((r) => r.id == reelId).firstOrNull;
+    if (reel == null) return;
+    final wasBookmarked = reel.isBookmarked;
     state = state.copyWith(
       reels: [
-        for (final reel in state.reels)
-          if (reel.id == reelId)
-            reel.copyWith(isBookmarked: !reel.isBookmarked)
+        for (final r in state.reels)
+          if (r.id == reelId)
+            r.copyWith(isBookmarked: !r.isBookmarked)
           else
-            reel,
+            r,
       ],
     );
     try {
       await ref.watch(apiClientProvider).post('/posts/$reelId/bookmark');
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      // Server rejected the toggle — revert so the UI matches reality.
+      state = state.copyWith(
+        reels: [
+          for (final r in state.reels)
+            if (r.id == reelId)
+              r.copyWith(isBookmarked: wasBookmarked)
+            else
+              r,
+        ],
+      );
+    }
   }
 }
 

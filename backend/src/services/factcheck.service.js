@@ -4,8 +4,13 @@ import { env } from "../config/env.js";
 const FACTCHECK_URL = "https://factchecktools.googleapis.com/v1alpha1/claims:search";
 
 /**
- * Query the Google Fact Check Tools API for known claim reviews.
- * Returns [] when no API key is configured (or on failure).
+ * LEGACY / UNUSED — superseded by the AI service.
+ *
+ * Fact-checking now runs in the AI service (ai-service/) via Gemini
+ * (set GEMINI_API_KEY in ai-service/.env). This module queried the Google
+ * Fact Check Tools API but is not imported anywhere and the backend env
+ * never defined factCheckApiKey, so it always returned []. Kept only as a
+ * reference; do not wire it up.
  */
 export async function searchFactChecks({ query, languageCode = "en" }) {
   if (!env.factCheckApiKey) return [];

@@ -115,6 +115,50 @@ class FeedNotifier extends Notifier<FeedState> {
     state = state.copyWith(posts: [post, ...state.posts]);
   }
 
+  /// Drop every post authored by a blocked user from the in-memory feed.
+  void removePostsByAuthor(String authorId) {
+    state = state.copyWith(
+      posts: [
+        for (final post in state.posts)
+          if (post.author.id != authorId) post,
+      ],
+    );
+  }
+
+  /// Follow/unfollow a post author from the post menu, updating every post
+  /// by that author in the feed. Returns false when the server rejected it.
+  Future<bool> toggleFollowAuthor(String authorId) async {
+    final wasFollowing =
+        state.posts.where((p) => p.author.id == authorId).firstOrNull?.author.isFollowing;
+    if (wasFollowing == null) return false;
+    final next = !wasFollowing;
+    _applyAuthorFollow(authorId, next);
+    try {
+      await ref.read(apiClientProvider).post('/users/$authorId/follow');
+      return true;
+    } catch (_) {
+      _applyAuthorFollow(authorId, wasFollowing);
+      return false;
+    }
+  }
+
+  void _applyAuthorFollow(String authorId, bool isFollowing) {
+    state = state.copyWith(
+      posts: [
+        for (final post in state.posts)
+          if (post.author.id == authorId)
+            post.copyWith(
+              author: post.author.copyWith(
+                isFollowing: isFollowing,
+                followers: post.author.followers + (isFollowing ? 1 : -1),
+              ),
+            )
+          else
+            post,
+      ],
+    );
+  }
+
   Future<void> toggleLike(String postId) async {
     final wasLiked = state.posts.where((p) => p.id == postId).firstOrNull?.isLiked;
     state = state.copyWith(

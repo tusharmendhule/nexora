@@ -1,7 +1,9 @@
 import { Conversation } from "../models/Conversation.js";
 import { Message } from "../models/Message.js";
 import { User } from "../models/User.js";
+import { Block } from "../models/Block.js";
 import { emitToUser } from "../services/socket.service.js";
+import { media } from "../services/cloudinary.service.js";
 
 /** List the current user's conversations with unread counts (batched). */
 export async function listConversations(req, res, next) {
@@ -27,6 +29,7 @@ export async function listConversations(req, res, next) {
           id: { $first: "$_id" },
           sender: { $first: "$sender" },
           text: { $first: "$text" },
+          type: { $first: "$type" },
           createdAt: { $first: "$createdAt" },
         },
       },
@@ -61,6 +64,7 @@ export async function listConversations(req, res, next) {
               id: last.id.toString(),
               senderId: last.sender.toString(),
               text: last.text,
+              type: last.type ?? "text",
               createdAt: last.createdAt,
             }
           : null,
@@ -124,6 +128,7 @@ export async function getMessages(req, res, next) {
         id: m._id.toString(),
         senderId: m.sender.toString(),
         text: m.text,
+        type: m.type ?? "text",
         createdAt: m.createdAt,
         isRead: m.isRead,
       })),
@@ -133,22 +138,52 @@ export async function getMessages(req, res, next) {
   }
 }
 
-/** Send a message in a conversation. */
+/** Send a message in a conversation (text, or an uploaded image). */
 export async function sendMessage(req, res, next) {
   try {
-    const { text } = req.body;
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: "message text required" });
-    }
     const convo = await Conversation.findById(req.params.id);
     if (!convo || !convo.participants.some((p) => p.toString() === req.user._id.toString())) {
       return res.status(404).json({ error: "Conversation not found" });
     }
 
+    // Blocked peers cannot send you messages.
+    const peer = convo.participants.find(
+      (p) => p.toString() !== req.user._id.toString(),
+    );
+    if (peer) {
+      const blocked = await Block.exists({
+        $or: [
+          { blocker: req.user._id, blocked: peer },
+          { blocker: peer, blocked: req.user._id },
+        ],
+      });
+      if (blocked) {
+        return res.status(403).json({ error: "Messaging is blocked between these accounts" });
+      }
+    }
+
+    const { text } = req.body ?? {};
+    let type = "text";
+    let content = (text ?? "").trim().slice(0, 2000);
+
+    // Optional image upload (multipart `image` field).
+    if (req.file) {
+      const uploaded = await media.upload({
+        buffer: req.file.buffer,
+        folder: "nexora/chat",
+      });
+      type = "image";
+      content = uploaded.url;
+    }
+    if (!content) {
+      return res.status(400).json({ error: "message text or image required" });
+    }
+
     const message = await Message.create({
       conversation: convo._id,
       sender: req.user._id,
-      text: text.trim().slice(0, 2000),
+      text: content,
+      type,
     });
     await Conversation.findByIdAndUpdate(convo._id, {
       lastMessageAt: new Date(),
@@ -159,6 +194,7 @@ export async function sendMessage(req, res, next) {
       conversationId: convo._id.toString(),
       senderId: message.sender.toString(),
       text: message.text,
+      type: message.type,
       createdAt: message.createdAt,
       isRead: message.isRead,
     };

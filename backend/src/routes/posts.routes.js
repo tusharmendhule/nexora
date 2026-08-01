@@ -18,6 +18,14 @@ import { z } from "zod";
 
 const router = Router();
 
+// Multipart form-data delivers list fields as comma-joined strings (the
+// Flutter client sends hashtags.join(",")), while JSON callers send real
+// arrays. Accept both by splitting strings on commas.
+const splitList = (value) =>
+  typeof value === "string"
+    ? value.split(",").map((s) => s.trim()).filter(Boolean)
+    : value;
+
 router.post(
   "/",
   requireAuth,
@@ -26,8 +34,12 @@ router.post(
   validate(
     z.object({
       caption: z.string().max(2200).default(""),
-      hashtags: z.array(z.string().max(50)).max(20).optional(),
-      mentions: z.array(z.string().max(50)).max(20).optional(),
+      hashtags: z
+        .preprocess(splitList, z.array(z.string().max(50)).max(20))
+        .optional(),
+      mentions: z
+        .preprocess(splitList, z.array(z.string().max(50)).max(20))
+        .optional(),
       location: z.string().max(120).optional(),
     }),
   ),

@@ -9,8 +9,7 @@ REST API for Nexora: content workflow, feed, moderation and trust logic.
 - **Firebase Auth + JWT** authorization
 - **Cloudinary** media upload & CDN
 - **Redis** optional caching
-- **Google Fact Check Tools API** claim verification
-- Calls the **AI service** (`ai-service/`) for NLP trust scoring
+- Calls the **AI service** (`ai-service/`) for NLP trust scoring and **Gemini fact-checking** (set `GEMINI_API_KEY` in `ai-service/.env` to enable)
 
 ## Setup
 

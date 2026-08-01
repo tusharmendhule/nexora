@@ -17,6 +17,20 @@ const trustResultSchema = new mongoose.Schema(
         detail: String,
       },
     ],
+    checks: [
+      {
+        name: String,
+        label: String,
+        score: Number,
+        level: {
+          type: String,
+          enum: ["none", "low", "medium", "high"],
+          default: "none",
+        },
+        flags: [String],
+        detail: String,
+      },
+    ],
     factChecks: [
       {
         publisher: String,

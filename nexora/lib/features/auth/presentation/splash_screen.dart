@@ -23,6 +23,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   Future<void> _navigateAfterDelay() async {
     await Future<void>.delayed(const Duration(milliseconds: 2400));
     if (!mounted) return;
+    // Wait for the persisted-session restore so an authenticated user is
+    // routed straight home instead of being bounced back to the login screen.
+    await ref.read(authProvider.notifier).ensureRestored();
+    if (!mounted) return;
     final auth = ref.read(authProvider);
     if (!auth.isOnboarded) {
       context.go(Routes.onboarding);

@@ -11,19 +11,20 @@ from app.config import settings
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
+    f"{settings.gemini_model}:generateContent"
 )
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
 async def search_fact_checks(query: str, language_code: str = "en") -> list[dict]:
-    if settings.gemini_api_key:
-        items = await _gemini_factcheck(query)
-        if items:
-            return items
-    print("[factcheck] no GEMINI_API_KEY configured — returning empty results.")
-    return []
+    if not settings.gemini_api_key:
+        print("[factcheck] no GEMINI_API_KEY configured — returning empty results.")
+        return []
+    items = await _gemini_factcheck(query)
+    if not items:
+        print("[factcheck] Gemini found no verifiable sources — returning empty results.")
+    return items
 
 
 async def _gemini_factcheck(query: str) -> list[dict]:
@@ -47,7 +48,11 @@ async def _gemini_factcheck(query: str) -> list[dict]:
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {
                         "temperature": 0.2,
-                        "maxOutputTokens": 1024,
+                        "maxOutputTokens": 8192,
+                        # Gemini 2.x models spend their token budget on
+                        # "thinking" by default (900+ tokens), truncating the
+                        # JSON answer. Disable it and keep the budget large.
+                        "thinkingConfig": {"thinkingBudget": 0},
                     },
                 },
             )
@@ -84,6 +89,10 @@ def _strip_json(text: str) -> str:
     end = text.rfind("]")
     if start != -1 and end != -1 and end > start:
         return text[start : end + 1]
+    if start != -1:
+        # Truncated response: an array was started but never closed.
+        # Return an empty array so the caller degrades instead of crashing.
+        return "[]"
     return text
 
 

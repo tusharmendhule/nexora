@@ -74,28 +74,11 @@ class ModeratorNotifier extends Notifier<ModeratorState> {
     }
   }
 
-  Future<void> resolve(String itemId) async {
-    final item = state.queue.where((i) => i.id == itemId).firstOrNull;
-    if (item == null) return;
+  /// Sends a moderation action, restoring the item to the queue if the server
+  /// call fails so the UI never claims a resolution that did not happen.
+  Future<void> _sendAction(ModerationItem item, String action) async {
     state = state.copyWith(
-      queue: state.queue.where((i) => i.id != itemId).toList(),
-    );
-    try {
-      await ref.read(apiClientProvider).post('/moderation/action', body: {
-        'action': 'dismiss',
-        'targetType': item.targetType,
-        'targetId': item.targetId,
-        'reportId': item.reportId,
-        'reason': item.reason,
-      });
-    } catch (_) {/* ignore */}
-  }
-
-  Future<void> takeAction(String itemId, String action) async {
-    final item = state.queue.where((i) => i.id == itemId).firstOrNull;
-    if (item == null) return;
-    state = state.copyWith(
-      queue: state.queue.where((i) => i.id != itemId).toList(),
+      queue: state.queue.where((i) => i.id != item.id).toList(),
     );
     try {
       await ref.read(apiClientProvider).post('/moderation/action', body: {
@@ -105,12 +88,31 @@ class ModeratorNotifier extends Notifier<ModeratorState> {
         'reportId': item.reportId,
         'reason': item.reason,
       });
-    } catch (_) {/* ignore */}
+    } catch (_) {
+      // Server never applied the action — put the item back so the queue
+      // reflects reality instead of silently dropping an open report.
+      state = state.copyWith(
+        queue: [item, ...state.queue],
+      );
+    }
+  }
+
+  Future<void> resolve(String itemId) async {
+    final item = state.queue.where((i) => i.id == itemId).firstOrNull;
+    if (item == null) return;
+    await _sendAction(item, 'dismiss');
+  }
+
+  Future<void> takeAction(String itemId, String action) async {
+    final item = state.queue.where((i) => i.id == itemId).firstOrNull;
+    if (item == null) return;
+    await _sendAction(item, action);
   }
 
   Future<void> resolveAll() async {
     final items = state.queue;
     state = state.copyWith(queue: const []);
+    final failed = <ModerationItem>[];
     for (final item in items) {
       try {
         await ref.read(apiClientProvider).post('/moderation/action', body: {
@@ -120,7 +122,12 @@ class ModeratorNotifier extends Notifier<ModeratorState> {
           'reportId': item.reportId,
           'reason': item.reason,
         });
-      } catch (_) {/* keep clearing locally */}
+      } catch (_) {
+        failed.add(item);
+      }
+    }
+    if (failed.isNotEmpty) {
+      state = state.copyWith(queue: [...failed, ...state.queue]);
     }
   }
 }

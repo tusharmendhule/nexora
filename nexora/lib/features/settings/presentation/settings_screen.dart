@@ -5,7 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/routes.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/theme_provider.dart';
+import '../../../core/models/user.dart';
+import '../../../core/network/api_client.dart';
+import '../../../shared/widgets/avatar.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/trust_widgets.dart';
 import '../../auth/presentation/auth_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -52,14 +56,14 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingTile(
                   icon: Icons.lock_outline_rounded,
                   title: 'Privacy',
-                  subtitle: 'Who can see your activity',
-                  onTap: () => _comingSoon(context),
+                  subtitle: 'How your data is protected',
+                  onTap: () => _showPrivacy(context),
                 ),
                 _SettingTile(
                   icon: Icons.block_rounded,
                   title: 'Blocked accounts',
                   subtitle: 'Manage your boundaries',
-                  onTap: () => _comingSoon(context),
+                  onTap: () => _showBlocked(context, ref),
                 ),
               ],
             ),
@@ -96,12 +100,12 @@ class SettingsScreen extends ConsumerWidget {
                   icon: Icons.info_outline_rounded,
                   title: 'About Nexora',
                   subtitle: 'v1.0.0 · The Next Generation of Connected Communities',
-                  onTap: () => _comingSoon(context),
+                  onTap: () => _showAbout(context),
                 ),
                 _SettingTile(
                   icon: Icons.description_outlined,
                   title: 'Community Guidelines',
-                  onTap: () => _comingSoon(context),
+                  onTap: () => _showGuidelines(context),
                 ),
               ],
             ),
@@ -184,11 +188,287 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _comingSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('This will be fully wired up with the backend 🔌'),
-        behavior: SnackBarBehavior.floating,
+  void _showPrivacy(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _InfoSheet(
+        icon: Icons.lock_outline_rounded,
+        title: 'Privacy at Nexora',
+        paragraphs: [
+          'Your account is protected with JWT-based authentication. Passwords are stored as bcrypt hashes and never shared.',
+          'Your Trust Score is computed from real AI analysis of your posts plus fact-check evidence. It is visible to the community by design — that is how trust works here.',
+          'Media you upload (posts, stories, avatars) is stored on Cloudinary. You can delete your posts at any time, which also removes their media.',
+          'Real-time notifications and chat run through an encrypted Socket.IO connection tied to your session.',
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showBlocked(BuildContext context, WidgetRef ref) async {
+    List<User> blocked = const [];
+    try {
+      final json = await ref.read(apiClientProvider).get('/users/blocked');
+      blocked = ((json as Map<String, dynamic>?)?['data'] as List? ?? const [])
+          .map((u) => User.fromApi(u as Map<String, dynamic>))
+          .toList();
+    } catch (_) {/* empty state */}
+    if (!context.mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => _BlockedSheet(blocked: blocked),
+    );
+  }
+
+  void _showAbout(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _InfoSheet(
+        icon: Icons.auto_awesome_rounded,
+        title: 'About Nexora',
+        paragraphs: [
+          'Nexora is a trust-first social platform. Every post is analysed by an AI pipeline and receives a Trust Score with a colour-coded label, so the community can see what is verified, vetted or under watch.',
+          'Version 1.0.0 · Flutter frontend, Node.js + Express API, MongoDB Atlas, Cloudinary media, Gemini-powered fact-checking.',
+        ],
+      ),
+    );
+  }
+
+  void _showGuidelines(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _InfoSheet(
+        icon: Icons.description_outlined,
+        title: 'Community Guidelines',
+        paragraphs: [
+          '1. Be honest. False reports, impersonation and fabricated claims lower your Trust Score.',
+          '2. Be kind. Harassment, hate speech and doxxing lead to moderation action.',
+          '3. Share real content. Misinformation is flagged by the AI fact-checking pipeline.',
+          '4. Respect boundaries. Blocked or reported members are reviewed by moderators.',
+          '5. Build trust. Verified members with high scores gain reach and community tools.',
+        ],
+      ),
+    );
+  }
+}
+
+/// Shared bottom-sheet for informational pages (Privacy / About / Guidelines).
+class _InfoSheet extends StatelessWidget {
+  const _InfoSheet({
+    required this.icon,
+    required this.title,
+    required this.paragraphs,
+  });
+
+  final IconData icon;
+  final String title;
+  final List<String> paragraphs;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: scheme.primary, size: 21),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final p in paragraphs)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          p,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            height: 1.5,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Blocked-accounts list backed by `GET /users/blocked`, with unblock.
+class _BlockedSheet extends ConsumerStatefulWidget {
+  const _BlockedSheet({required this.blocked});
+
+  final List<User> blocked;
+
+  @override
+  ConsumerState<_BlockedSheet> createState() => _BlockedSheetState();
+}
+
+class _BlockedSheetState extends ConsumerState<_BlockedSheet> {
+  late List<User> _blocked = widget.blocked;
+  bool _loading = false;
+
+  Future<void> _unblock(User user) async {
+    setState(() => _loading = true);
+    try {
+      await ref.read(apiClientProvider).post('/users/${user.id}/block');
+      if (!mounted) return;
+      setState(() {
+        _blocked = [
+          for (final u in _blocked)
+            if (u.id != user.id) u,
+        ];
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: scheme.outlineVariant,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
+              child: Row(
+                children: [
+                  Text(
+                    'Blocked accounts',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _blocked.isEmpty
+                  ? Center(
+                      child: Text(
+                        'You have not blocked anyone.',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      itemCount: _blocked.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                      itemBuilder: (context, index) {
+                        final user = _blocked[index];
+                        return ListTile(
+                          leading: NexoraAvatar(
+                            imageUrl: user.avatarUrl,
+                            fallbackText: user.username,
+                            size: 46,
+                          ),
+                          title: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  user.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              TrustBadge(label: user.effectiveTrustLabel, compact: true),
+                            ],
+                          ),
+                          subtitle: Text('@${user.username}'),
+                          trailing: _loading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : TextButton(
+                                  onPressed: () => _unblock(user),
+                                  child: const Text('Unblock'),
+                                ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -6,6 +6,55 @@ import { TrustResult } from "../models/TrustResult.js";
 import { Notification } from "../models/Notification.js";
 import { Like } from "../models/Like.js";
 import { Comment } from "../models/Comment.js";
+import { AdminSettings } from "../models/AdminSettings.js";
+
+/** Load the singleton settings doc (creates it with defaults if absent). */
+export async function getSettings() {
+  return AdminSettings.getSingleton();
+}
+
+/** GET /admin/settings — current platform settings (admin only). */
+export async function getAdminSettings(req, res, next) {
+  try {
+    const settings = await getSettings();
+    res.json({
+      settings: {
+        maintenanceMode: settings.maintenanceMode,
+        verifiedOnlyExplore: settings.verifiedOnlyExplore,
+        aiTriage: settings.aiTriage,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** PUT /admin/settings — persist admin dashboard switches (admin only). */
+export async function updateAdminSettings(req, res, next) {
+  try {
+    const { maintenanceMode, verifiedOnlyExplore, aiTriage } = req.body ?? {};
+    const settings = await getSettings();
+    if (typeof maintenanceMode === "boolean") {
+      settings.maintenanceMode = maintenanceMode;
+    }
+    if (typeof verifiedOnlyExplore === "boolean") {
+      settings.verifiedOnlyExplore = verifiedOnlyExplore;
+    }
+    if (typeof aiTriage === "boolean") {
+      settings.aiTriage = aiTriage;
+    }
+    await settings.save();
+    res.json({
+      settings: {
+        maintenanceMode: settings.maintenanceMode,
+        verifiedOnlyExplore: settings.verifiedOnlyExplore,
+        aiTriage: settings.aiTriage,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
 
 /** List users with filters + pagination for the admin dashboard. */
 export async function listUsers(req, res, next) {

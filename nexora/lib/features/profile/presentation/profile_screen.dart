@@ -12,8 +12,10 @@ import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../../shared/widgets/trust_widgets.dart';
+import '../../chat/presentation/chats_providers.dart';
 import '../../feed/data/models.dart';
 import '../../reels/data/models.dart';
+import 'follow_list_sheet.dart';
 import 'profile_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -38,6 +40,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     });
   }
 
+  void _showFollowList(User user, FollowListMode mode) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => FollowListSheet(userId: user.id, mode: mode),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -45,28 +59,32 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     final user = profile.user;
 
     if (profile.isLoading || user == null) {
+      // Scrollable so the skeleton never overflows on small screens (the
+      // shell builds all tabs eagerly, so this can lay out offstage).
       return Scaffold(
         body: SafeArea(
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    SkeletonBox(width: 32, height: 32),
-                    SizedBox(width: 12),
-                    SkeletonBox(width: 120, height: 18),
-                  ],
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 32, height: 32),
+                      SizedBox(width: 12),
+                      SkeletonBox(width: 120, height: 18),
+                    ],
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: SkeletonBox(height: 180, radius: BorderRadius.circular(20)),
-              ),
-              const SizedBox(height: 8),
-              const GridSkeleton(items: 9),
-            ],
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SkeletonBox(height: 180, radius: BorderRadius.circular(20)),
+                ),
+                const SizedBox(height: 8),
+                const GridSkeleton(items: 9),
+              ],
+            ),
           ),
         ),
       );
@@ -85,15 +103,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                   isMe: profile.isMe,
                   onEdit: () => context.push(Routes.editProfile),
                   onFollow: () => ref.read(profileProvider.notifier).toggleFollow(),
-                  onMessage: () {
-                    if (!profile.isMe) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                  onShowFollowers: () => _showFollowList(user, FollowListMode.followers),
+                  onShowFollowing: () => _showFollowList(user, FollowListMode.following),
+                  onMessage: () async {
+                    if (profile.isMe) return;
+                    final messenger = ScaffoldMessenger.of(context);
+                    final conversationId = await ref
+                        .read(chatsProvider.notifier)
+                        .startConversation(user.id);
+                    if (conversationId == null) {
+                      messenger.showSnackBar(
                         const SnackBar(
-                          content: Text('Messaging opens in the DMs 💬'),
+                          content: Text('Could not open the conversation.'),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
+                      return;
                     }
+                    if (!context.mounted) return;
+                    context.push(Routes.chatDetailPath(conversationId));
                   },
                   onTrust: () => context.push(Routes.trustCenter),
                 ),
@@ -125,6 +153,8 @@ class _ProfileHeader extends StatelessWidget {
     required this.isMe,
     required this.onEdit,
     required this.onFollow,
+    required this.onShowFollowers,
+    required this.onShowFollowing,
     required this.onMessage,
     required this.onTrust,
   });
@@ -133,6 +163,8 @@ class _ProfileHeader extends StatelessWidget {
   final bool isMe;
   final VoidCallback onEdit;
   final VoidCallback onFollow;
+  final VoidCallback onShowFollowers;
+  final VoidCallback onShowFollowing;
   final VoidCallback onMessage;
   final VoidCallback onTrust;
 
@@ -307,8 +339,16 @@ class _ProfileHeader extends StatelessWidget {
                     Row(
                       children: [
                         StatCounter(value: user.posts, label: 'Posts'),
-                        StatCounter(value: user.followers, label: 'Followers'),
-                        StatCounter(value: user.following, label: 'Following'),
+                        StatCounter(
+                          value: user.followers,
+                          label: 'Followers',
+                          onTap: onShowFollowers,
+                        ),
+                        StatCounter(
+                          value: user.following,
+                          label: 'Following',
+                          onTap: onShowFollowing,
+                        ),
                         StatCounter(value: user.reels, label: 'Reels'),
                       ],
                     ),
@@ -486,11 +526,20 @@ class _MediaGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final post = posts[index];
+        // Text-only posts have no media — render a placeholder tile instead
+        // of touching `images.first` on an empty list.
+        final thumb = post.thumbnail;
+        if (thumb == null || thumb.isEmpty) {
+          return Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const Icon(Icons.notes_rounded),
+          );
+        }
         return Stack(
           fit: StackFit.expand,
           children: [
             CachedNetworkImage(
-              imageUrl: post.isVideo ? post.videoUrl! : post.images.first,
+              imageUrl: thumb,
               fit: BoxFit.cover,
               errorWidget: (_, __, ___) => Container(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,

@@ -31,13 +31,24 @@ export async function getQueue(req, res, next) {
       return {
         id: report._id.toString(),
         reportId: report._id.toString(),
+        targetType: report.targetType,
+        targetId: report.targetId.toString(),
         reportedUser: target?.author ?? null,
         reporter: report.reporter,
         reason: report.reason,
         details: report.details ?? "",
         preview: target?.media?.[0]?.url ?? "",
         caption: target?.caption ?? "",
-        severity: report.reason === "harassment" || report.reason === "violence" ? 3 : report.reason === "spam" ? 2 : 1,
+        severity:
+          report.reason === "AI content flag"
+            ? /hate|offensive/i.test(report.details ?? "")
+              ? 3
+              : 2
+            : report.reason === "harassment" || report.reason === "violence"
+              ? 3
+              : report.reason === "spam"
+                ? 2
+                : 1,
         reportedAt: report.createdAt,
         status: report.status,
       };

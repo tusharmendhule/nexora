@@ -163,8 +163,17 @@ class _PostsResults extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final post = posts[index];
+        // Text-only posts have no media — render a placeholder tile instead
+        // of touching `images.first` on an empty list.
+        final thumb = post.thumbnail;
+        if (thumb == null || thumb.isEmpty) {
+          return Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const Icon(Icons.notes_rounded),
+          );
+        }
         return CachedNetworkImage(
-          imageUrl: post.isVideo ? post.videoUrl! : post.images.first,
+          imageUrl: thumb,
           fit: BoxFit.cover,
           errorWidget: (_, __, ___) => Container(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
